@@ -118,6 +118,7 @@ fsspec @ file:///private/var/folders/sy/f16zz6x50xz3113nwtb9bvq00000gp/T/abs_2di
 gast==0.6.0
 gensim @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/gensim_1699270171824/work
 geopandas==1.0.1
+git-filter-repo==2.47.0
 gitdb @ file:///tmp/build/80754af9/gitdb_1617117951232/work
 GitPython @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/gitpython_1699270358699/work
 google-pasta==0.2.0
