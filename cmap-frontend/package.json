@@ -10,8 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "i18next": "^23.4.7",
     "react-i18next": "^12.3.1",
     "i18next-browser-languagedetector": "^7.0.1",
@@ -19,8 +19,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.29.0",
-    "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
+    "@types/react": "^18.2.46",
+    "@types/react-dom": "^18.2.19",
     "@vitejs/plugin-react": "^4.5.2",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.29.0",
@@ -37,3 +37,4 @@
   "author": "",
   "license": "ISC"
 }
+
