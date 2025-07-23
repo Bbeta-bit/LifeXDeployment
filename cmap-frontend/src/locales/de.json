@@ -1,0 +1,11 @@
+{
+  "welcome": "Willkommen bei AgentX",
+  "enter_loan_preferences": "Geben Sie Ihre Kreditpräferenzen ein, z. B. Zinssatz oder Laufzeit",
+  "chat_title": "AgentX Assistent",
+  "form": {
+    "fullName": "Vollständiger Name",
+    "loanAmount": "Kreditsumme",
+    "annualIncome": "Jahreseinkommen",
+    "collateral": "Sicherheiten"
+  }
+}

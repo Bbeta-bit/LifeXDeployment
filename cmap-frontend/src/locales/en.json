@@ -1,0 +1,11 @@
+{
+  "welcome": "Welcome to AgentX",
+  "enter_loan_preferences": "Enter your loan preferences, such as rate or term",
+  "chat_title": "AgentX",
+  "form": {
+    "fullName": "Full Name",
+    "loanAmount": "Loan Amount",
+    "annualIncome": "Annual Income",
+    "collateral": "Collateral"
+  }
+}
