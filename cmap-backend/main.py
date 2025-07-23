@@ -1,17 +1,18 @@
 import os
-from openai import OpenAI
+import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import router as api_router
+from app.utils.openrouter_client import chat_with_agent
 
-# 加载环境变量（读取 .env 文件）
+
+# 加载环境变量（读取 API.env 文件）
 load_dotenv(dotenv_path="API.env")
 
-print("OPENAI_API_KEY =", os.getenv("OPENAI_API_KEY"))
-
-# 创建 OpenAI 客户端（新版 SDK 用法）
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# 从环境变量中读取 OpenRouter API Key
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")  # ⚠️注意变量名
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # 创建 FastAPI 应用
 app = FastAPI(
@@ -38,10 +39,23 @@ async def chat(request: Request):
     data = await request.json()
     user_input = data.get("message")
 
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": user_input}]
-    )
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
-    reply = response.choices[0].message.content
+    payload = {
+        "model": "google/gemini-2-0-flash-experimental",  # ✅ 模型名称必须用 OpenRouter 提供的
+        "messages": [
+            {"role": "user", "content": user_input}
+        ]
+    }
+
+    response = requests.post(OPENROUTER_API_URL, headers=headers, json=payload)
+
+    if response.status_code != 200:
+        return {"reply": f"Error: {response.status_code} - {response.text}"}
+
+    result = response.json()
+    reply = result['choices'][0]['message']['content']
     return {"reply": reply}
