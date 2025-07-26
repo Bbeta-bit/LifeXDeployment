@@ -21,10 +21,14 @@ app = FastAPI(
     version="0.1"
 )
 
-# 添加 CORS 中间件，允许前端跨域访问
+# 更新你的CORS配置
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",                    # 本地开发
+        "https://cmap-frontend.onrender.com",      # 线上前端URL
+        "https://*.onrender.com"                    # 允许所有onrender子域名（可选）
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,7 +85,7 @@ async def chat(request: Request):
         
     except Exception as e:
         return {
-            "reply": "抱歉，系统出现了一些问题，请稍后再试或联系客服。",
+            "reply": "wait, we met some tech problems, please try again later",
             "status": "error",
             "error_detail": str(e)
         }
