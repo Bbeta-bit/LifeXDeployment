@@ -1,91 +1,171 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { sendMessageToChatAPI } from '../services/api';
+import { sendMessageToChatAPI } from '../services/api.js';
 
-export default function Chatbot({ selectedLang }) {
-  const [messages, setMessages] = useState([
-    { sender: 'ai', text: 'Hello! How can I help you with your loan application?' }
-  ]);
+const Chatbot = () => {
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const chatRef = useRef(null);
+  const textareaRef = useRef(null);
 
-  const scrollToBottom = () => {
+  // 自动滚动到底部
+  useEffect(() => {
     if (chatRef.current) {
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
     }
-  };
-
-  useEffect(() => {
-    scrollToBottom();
   }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim() || loading) return;
-    const userMsg = { sender: 'user', text: input.trim() };
-    setMessages(prev => [...prev, userMsg]);
+    if (!input.trim() || isLoading) return;
+
+    const userMessage = { sender: 'user', text: input };
+    setMessages((prev) => [...prev, userMessage]);
+    
+    const currentInput = input;
     setInput('');
-    setLoading(true);
+    setIsLoading(true);
 
     try {
-      const reply = await sendMessageToChatAPI(input.trim(), selectedLang);
-      setMessages(prev => [...prev, { sender: 'ai', text: reply }]);
-    } catch (err) {
-      console.error(err);
-      setMessages(prev => [...prev, { sender: 'ai', text: 'Error: Failed to connect to server.' }]);
+      // 调用后端API
+      const reply = await sendMessageToChatAPI(currentInput);
+      
+      // 添加AI回复
+      setMessages((prev) => [
+        ...prev,
+        { sender: 'bot', text: reply }
+      ]);
+    } catch (error) {
+      console.error('Error calling API:', error);
+      
+      // 显示错误信息
+      setMessages((prev) => [
+        ...prev,
+        { 
+          sender: 'bot', 
+          text: '抱歉，系统出现了问题，请稍后再试。如果问题持续存在，请联系客服。' 
+        }
+      ]);
+    } finally {
+      setIsLoading(false);
     }
+  };
 
-    setLoading(false);
+  const handleInputChange = (e) => {
+    setInput(e.target.value);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* 聊天框主体 */}
+    <div className="flex flex-col h-full relative">
+      {/* Header with Logo and Title */}
+      <div className="relative px-4 py-3 border-b bg-white shadow-sm">
+        {/* Logo - 固定在左上角 */}
+        <a 
+          href="https://lifex.com.au/" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="absolute left-4 top-2 z-10"
+        >
+          <img 
+            src="/lifex-logo.png" 
+            alt="LIFEX Logo" 
+            className="h-6 w-auto hover:opacity-80 transition-opacity"
+          />
+        </a>
+        
+        {/* Centered Title - 位置更低 */}
+        <div className="flex justify-center items-center pt-6">
+          <h1 className="text-lg font-semibold text-gray-800">Agent X</h1>
+        </div>
+      </div>
+
+      {/* Chat Messages */}
       <div
         ref={chatRef}
-        className="flex-1 overflow-y-auto bg-gray-100 p-4 rounded border border-gray-300 shadow-inner"
+        className="flex-1 overflow-y-auto px-4 py-4 bg-gray-100 space-y-3"
       >
+        {messages.length === 0 && (
+          <div className="flex justify-center items-center h-full">
+            <div className="text-center text-gray-500">
+              <p className="text-lg mb-2">Hello, how can I help you today?</p>
+              <p className="text-sm">Start by telling us about your loan preferences</p>
+            </div>
+          </div>
+        )}
+        
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`mb-3 flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`rounded-lg px-4 py-2 max-w-[70%] text-sm whitespace-pre-wrap
-                ${m.sender === 'user' ? 'bg-green-200 text-right' : 'bg-white border border-gray-300'}
-              `}
+              className={`px-4 py-2 rounded-lg max-w-[70%] whitespace-pre-wrap text-sm ${
+                m.sender === 'user' ? 'bg-green-200' : 'bg-white border'
+              }`}
             >
               {m.text}
             </div>
           </div>
         ))}
-        {loading && <div className="text-sm text-gray-500 mt-2">AgentX is thinking...</div>}
+        
+        {/* Loading indicator */}
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="px-4 py-2 rounded-lg bg-white border text-sm text-gray-500">
+              <div className="flex items-center space-x-1">
+                <div className="animate-bounce">●</div>
+                <div className="animate-bounce delay-100">●</div>
+                <div className="animate-bounce delay-200">●</div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 输入栏 */}
-      <div className="mt-4 flex items-center">
-        <input
-          type="text"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSend()}
-          placeholder="Enter your loan preferences, such as rate or term"
-          disabled={loading}
-          className="flex-1 border border-gray-300 rounded-lg px-4 py-2 mr-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
-        />
-        <button
-          onClick={handleSend}
-          disabled={loading || !input.trim()}
-          className={`px-4 py-2 rounded-lg font-semibold ${
-            input.trim()
-              ? 'bg-blue-600 text-white hover:bg-blue-700'
-              : 'bg-gray-300 text-gray-600 cursor-not-allowed'
-          }`}
-        >
-          Send
-        </button>
+      {/* Input Bar */}
+      <div className="px-4 py-3 bg-white border-t shadow-sm">
+        <div className="relative">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            rows={1}
+            placeholder="Tell us your loan preferences, like interest rate or repayment term"
+            className="w-full resize-none overflow-hidden rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm"
+            disabled={isLoading}
+          />
+          <button
+            onClick={handleSend}
+            disabled={isLoading || !input.trim()}
+            className={`absolute right-2 bottom-2 text-sm font-semibold ${
+              isLoading || !input.trim() 
+                ? 'text-gray-400 cursor-not-allowed' 
+                : 'text-blue-600 hover:underline'
+            }`}
+          >
+            {isLoading ? 'Sending...' : 'Send'}
+          </button>
+        </div>
       </div>
     </div>
   );
-}
+};
+
+export default Chatbot;
+
+
+
+
 
 

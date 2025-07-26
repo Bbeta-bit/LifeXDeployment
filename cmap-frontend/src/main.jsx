@@ -1,4 +1,4 @@
-import './i18n'; // 放在 ReactDom 渲染前
+import './index.css';
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
