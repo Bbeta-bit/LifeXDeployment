@@ -1,12 +1,30 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { sendMessageToChatAPI } from '../services/api.js';
+import { sendMessageToChatAPI, sendEnhancedMessage, resetConversation } from '../services/api.js';
 
 const Chatbot = ({ onNewMessage, conversationHistory }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  
+  // 新增状态用于跟踪对话流程（可选功能）
+  const [sessionId, setSessionId] = useState('');
+  const [conversationStage, setConversationStage] = useState('greeting');
+  const [mvpProgress, setMvpProgress] = useState({
+    completed_fields: [],
+    missing_fields: ['loan_type', 'asset_type', 'property_status', 'ABN_years', 'GST_years'],
+    is_complete: false
+  });
+  const [preferencesCollected, setPreferencesCollected] = useState({});
+  const [useEnhancedAPI, setUseEnhancedAPI] = useState(true); // 可以控制是否使用新API
+  
   const chatRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // 生成会话ID
+  useEffect(() => {
+    const newSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    setSessionId(newSessionId);
+  }, []);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -35,18 +53,57 @@ const Chatbot = ({ onNewMessage, conversationHistory }) => {
     setIsLoading(true);
 
     try {
-      // 调用后端API
-      const reply = await sendMessageToChatAPI(currentInput);
+      let replyText = '';
+      let apiResponse = null;
+
+      if (useEnhancedAPI) {
+        try {
+          // 尝试使用新的增强API
+          const chatHistory = messages.map(msg => ({
+            role: msg.sender === 'user' ? 'user' : 'assistant',
+            content: msg.text
+          }));
+
+          apiResponse = await sendEnhancedMessage(currentInput, sessionId, chatHistory);
+          
+          if (apiResponse && apiResponse.status === 'success') {
+            replyText = apiResponse.reply;
+            
+            // 更新对话状态信息（如果返回了的话）
+            if (apiResponse.conversation_stage) {
+              setConversationStage(apiResponse.conversation_stage);
+            }
+            
+            if (apiResponse.mvp_progress) {
+              setMvpProgress(apiResponse.mvp_progress);
+            }
+            
+            if (apiResponse.preferences_collected) {
+              setPreferencesCollected(apiResponse.preferences_collected);
+            }
+          } else {
+            throw new Error('Enhanced API returned error status');
+          }
+        } catch (enhancedError) {
+          console.warn('Enhanced API failed, falling back to original API:', enhancedError);
+          // 回退到原来的API
+          replyText = await sendMessageToChatAPI(currentInput);
+          setUseEnhancedAPI(false); // 标记增强API不可用
+        }
+      } else {
+        // 直接使用原来的API
+        replyText = await sendMessageToChatAPI(currentInput);
+      }
       
       // 添加AI回复
-      const botMessage = { sender: 'bot', text: reply };
+      const botMessage = { sender: 'bot', text: replyText };
       setMessages((prev) => [...prev, botMessage]);
       
       // 通知父组件有新的AI回复
       if (onNewMessage) {
         onNewMessage({
           role: 'assistant',
-          content: reply,
+          content: replyText,
           timestamp: new Date().toISOString()
         });
       }
@@ -87,6 +144,47 @@ const Chatbot = ({ onNewMessage, conversationHistory }) => {
     }
   };
 
+  // 重置对话的函数
+  const handleResetConversation = async () => {
+    try {
+      if (useEnhancedAPI) {
+        await resetConversation(sessionId);
+      }
+
+      // 重置本地状态
+      setMessages([]);
+      setConversationStage('greeting');
+      setMvpProgress({
+        completed_fields: [],
+        missing_fields: ['loan_type', 'asset_type', 'property_status', 'ABN_years', 'GST_years'],
+        is_complete: false
+      });
+      setPreferencesCollected({});
+    } catch (error) {
+      console.error('Error resetting conversation:', error);
+      // 即使重置API失败，也清除本地状态
+      setMessages([]);
+    }
+  };
+
+  // 获取阶段显示名称
+  const getStageDisplayName = (stage) => {
+    const stageNames = {
+      'greeting': 'Getting Started',
+      'mvp_collection': 'Collecting Info',
+      'preference_collection': 'Understanding Preferences',
+      'product_matching': 'Finding Products',
+      'gap_analysis': 'Reviewing Requirements',
+      'refinement': 'Refining Options',
+      'final_recommendation': 'Final Recommendation',
+      'handoff': 'Specialist Referral'
+    };
+    return stageNames[stage] || 'In Progress';
+  };
+
+  // 确定是否显示进度信息（只在使用增强API时显示）
+  const showProgressInfo = useEnhancedAPI && conversationStage !== 'greeting';
+
   return (
     <div className="flex flex-col h-full relative">
       {/* Header with Logo and Title */}
@@ -105,10 +203,41 @@ const Chatbot = ({ onNewMessage, conversationHistory }) => {
           />
         </a>
         
-        {/* Centered Title - 位置更低 */}
+        {/* Centered Title with Progress Info */}
         <div className="flex justify-center items-center pt-6">
-          <h1 className="text-lg font-semibold text-gray-800">Agent X</h1>
+          <div className="text-center">
+            <h1 className="text-lg font-semibold text-gray-800">Agent X</h1>
+            {/* 进度指示器（仅在使用增强API时显示） */}
+            {showProgressInfo && (
+              <div className="text-xs text-gray-500 mt-1">
+                {getStageDisplayName(conversationStage)}
+                {conversationStage === 'mvp_collection' && mvpProgress.completed_fields.length > 0 && (
+                  <span className="ml-2">({mvpProgress.completed_fields.length}/5)</span>
+                )}
+                {conversationStage === 'preference_collection' && Object.keys(preferencesCollected).length > 0 && (
+                  <span className="ml-2">({Object.keys(preferencesCollected).length} prefs)</span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* 重置按钮（仅在有消息时显示） */}
+        {messages.length > 0 && (
+          <button
+            onClick={handleResetConversation}
+            className="absolute right-4 top-4 text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-600 transition-colors"
+          >
+            Reset
+          </button>
+        )}
+
+        {/* API状态指示器（开发调试用，可选） */}
+        {process.env.NODE_ENV === 'development' && (
+          <div className="absolute right-4 bottom-1 text-xs text-gray-400">
+            {useEnhancedAPI ? 'Enhanced' : 'Legacy'} API
+          </div>
+        )}
       </div>
 
       {/* Chat Messages */}
@@ -154,8 +283,22 @@ const Chatbot = ({ onNewMessage, conversationHistory }) => {
         )}
       </div>
 
-      {/* Input Bar */}
+      {/* Input Bar with Stage Hints */}
       <div className="px-4 py-3 bg-white border-t shadow-sm">
+        {/* 阶段特定提示（仅在使用增强API时显示） */}
+        {useEnhancedAPI && conversationStage === 'preference_collection' && Object.keys(preferencesCollected).length === 0 && (
+          <div className="mb-2 text-xs text-blue-600 bg-blue-50 p-2 rounded">
+            💡 Now I'll ask about your preferences (interest rate, monthly budget, etc.)
+          </div>
+        )}
+        
+        {useEnhancedAPI && conversationStage === 'mvp_collection' && mvpProgress.missing_fields.length > 0 && (
+          <div className="mb-2 text-xs text-amber-600 bg-amber-50 p-2 rounded">
+            ℹ️ Still need: {mvpProgress.missing_fields.slice(0, 2).join(', ')}
+            {mvpProgress.missing_fields.length > 2 && '...'}
+          </div>
+        )}
+
         <div className="relative">
           <textarea
             ref={textareaRef}
