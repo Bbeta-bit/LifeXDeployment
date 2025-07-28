@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import router as api_router
 from app.utils.openrouter_client import chat_with_agent
 from app.services.prompt_service import PromptService
+from app.services.enhanced_customer_extractor import EnhancedCustomerInfoExtractor, CustomerInfo
 
 # 加载环境变量（读取 API.env 文件）
 load_dotenv(dotenv_path="API.env")
@@ -36,6 +37,7 @@ app.add_middleware(
 
 # 初始化 Prompt 服务
 prompt_service = PromptService()
+customer_extractor = EnhancedCustomerInfoExtractor()
 
 # 接口挂载
 app.include_router(api_router)
@@ -49,7 +51,7 @@ async def chat(request: Request):
         chat_history = data.get("history", [])  # 获取聊天历史（可选）
         
         if not user_input:
-            raise HTTPException(status_code=400, detail="消息内容不能为空")
+            raise HTTPException(status_code=400, detail="Message content cannot be empty")
 
         # 使用 prompt_service 创建完整的消息列表
         messages = prompt_service.create_chat_messages(user_input, chat_history)
@@ -85,10 +87,97 @@ async def chat(request: Request):
         
     except Exception as e:
         return {
-            "reply": "wait, we met some tech problems, please try again later",
+            "reply": "Sorry, we encountered a technical issue. Please try again later.",
             "status": "error",
             "error_detail": str(e)
         }
+
+@app.post("/extract-customer-info")
+async def extract_customer_info(request: Request):
+    """
+    Extract customer information from conversation history
+    """
+    try:
+        data = await request.json()
+        conversation_history = data.get("conversation_history", [])
+        existing_info_data = data.get("existing_info")
+        
+        if not conversation_history:
+            raise HTTPException(status_code=400, detail="Conversation history cannot be empty")
+
+        # Extract information
+        if existing_info_data:
+            try:
+                existing_info = CustomerInfo(**existing_info_data)
+                # For now, just extract fresh info (you can implement update later)
+                extracted_info = await customer_extractor.extract_from_conversation(conversation_history)
+            except Exception:
+                extracted_info = await customer_extractor.extract_from_conversation(conversation_history)
+        else:
+            extracted_info = await customer_extractor.extract_from_conversation(conversation_history)
+
+        # Get missing fields
+        missing_fields = customer_extractor.get_missing_fields(extracted_info)
+        
+        # Generate follow-up questions
+        follow_up_questions = customer_extractor.generate_follow_up_questions(extracted_info)
+
+        return {
+            "status": "success",
+            "customer_info": extracted_info.dict(),
+            "missing_fields": missing_fields,
+            "extraction_completeness": min(len(extracted_info.extracted_fields) / 20.0, 1.0),  # 基于更多字段计算
+            "suggestions": {
+                "next_questions": follow_up_questions,
+                "confidence_level": "high" if extracted_info.confidence_score > 0.7 
+                                  else "medium" if extracted_info.confidence_score > 0.4 
+                                  else "low"
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Information extraction failed: {str(e)}"
+        )
+
+@app.post("/validate-customer-info")
+async def validate_customer_info(request: Request):
+    """
+    Validate customer information completeness and accuracy
+    """
+    try:
+        data = await request.json()
+        customer_info_data = data.get("customer_info")
+        
+        if not customer_info_data:
+            raise HTTPException(status_code=400, detail="Customer information cannot be empty")
+
+        customer_info = CustomerInfo(**customer_info_data)
+        missing_fields = customer_extractor.get_missing_fields(customer_info)
+        
+        # Validation logic
+        validation_result = {
+            "is_valid": len(missing_fields) <= 3,  # Allow max 3 important fields missing
+            "missing_fields": missing_fields,
+            "completeness_score": min(len(customer_info.extracted_fields) / 15.0, 1.0),
+            "required_fields_missing": [
+                field for field in ["name", "income", "desired_loan_amount"] 
+                if field in missing_fields
+            ]
+        }
+
+        return {
+            "status": "success",
+            "validation": validation_result,
+            "recommendations": _generate_completion_recommendations(missing_fields)
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Information validation failed: {str(e)}"
+        )
 
 # 健康检查接口
 @app.get("/health")
@@ -96,5 +185,57 @@ async def health_check():
     return {
         "status": "healthy",
         "message": "Car Loan AI Agent is running",
-        "prompt_system": "loaded" if prompt_service.product_info != "产品信息暂时不可用" else "error"
+        "prompt_system": "loaded" if prompt_service.product_info != "Product information temporarily unavailable" else "error"
     }
+
+def _generate_follow_up_questions(missing_fields: list) -> list:
+    """Generate follow-up questions based on missing fields"""
+    question_mapping = {
+        "name": "What is your full name?",
+        "age": "What is your age?",
+        "income": "What is your monthly income approximately?",
+        "employment_type": "What type of work do you do?",
+        "employment_status": "What is your current employment status?",
+        "phone": "Could you please provide your contact phone number?",
+        "abn": "Do you have an ABN number?",
+        "credit_score": "Do you know your credit score?",
+        "vehicle_make": "What brand is your vehicle?",
+        "vehicle_model": "What model is your vehicle?",
+        "vehicle_year": "What year is your vehicle?",
+        "vehicle_value": "What is the approximate value of your vehicle?",
+        "desired_loan_amount": "How much would you like to borrow?",
+        "loan_purpose": "What will you use the loan for?",
+        "monthly_expenses": "What are your approximate monthly expenses?",
+        "existing_loan_amount": "Do you have any existing loans on the vehicle?"
+    }
+    
+    questions = []
+    for field in missing_fields[:4]:  # Suggest max 4 questions
+        if field in question_mapping:
+            questions.append(question_mapping[field])
+    
+    return questions
+
+def _generate_completion_recommendations(missing_fields: list) -> list:
+    """Generate recommendations for completing information"""
+    recommendations = []
+    
+    if "income" in missing_fields:
+        recommendations.append("Recommend collecting customer income information to assess repayment capacity")
+    
+    if "desired_loan_amount" in missing_fields:
+        recommendations.append("Need to confirm customer's desired loan amount")
+    
+    if any(field in missing_fields for field in ["vehicle_make", "vehicle_model", "vehicle_value"]):
+        recommendations.append("Need to complete vehicle information for accurate valuation")
+    
+    if "phone" in missing_fields:
+        recommendations.append("Recommend collecting contact information for follow-up communication")
+        
+    if "abn" in missing_fields:
+        recommendations.append("For business customers, ABN information may be required")
+        
+    if "credit_score" in missing_fields:
+        recommendations.append("Credit score information would help with loan assessment")
+    
+    return recommendations

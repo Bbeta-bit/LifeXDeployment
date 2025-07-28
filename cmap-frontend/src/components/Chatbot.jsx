@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { sendMessageToChatAPI } from '../services/api.js';
 
-const Chatbot = () => {
+const Chatbot = ({ onNewMessage, conversationHistory }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -21,6 +21,15 @@ const Chatbot = () => {
     const userMessage = { sender: 'user', text: input };
     setMessages((prev) => [...prev, userMessage]);
     
+    // 通知父组件有新的用户消息
+    if (onNewMessage) {
+      onNewMessage({
+        role: 'user',
+        content: input,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
     const currentInput = input;
     setInput('');
     setIsLoading(true);
@@ -30,21 +39,34 @@ const Chatbot = () => {
       const reply = await sendMessageToChatAPI(currentInput);
       
       // 添加AI回复
-      setMessages((prev) => [
-        ...prev,
-        { sender: 'bot', text: reply }
-      ]);
+      const botMessage = { sender: 'bot', text: reply };
+      setMessages((prev) => [...prev, botMessage]);
+      
+      // 通知父组件有新的AI回复
+      if (onNewMessage) {
+        onNewMessage({
+          role: 'assistant',
+          content: reply,
+          timestamp: new Date().toISOString()
+        });
+      }
     } catch (error) {
       console.error('Error calling API:', error);
       
       // 显示错误信息
-      setMessages((prev) => [
-        ...prev,
-        { 
-          sender: 'bot', 
-          text: '抱歉，系统出现了问题，请稍后再试。如果问题持续存在，请联系客服。' 
-        }
-      ]);
+      const errorMessage = 'Sorry, we encountered a technical issue. Please try again later. If the problem persists, please contact customer service.';
+      const botErrorMessage = { sender: 'bot', text: errorMessage };
+      
+      setMessages((prev) => [...prev, botErrorMessage]);
+      
+      // 通知父组件错误消息
+      if (onNewMessage) {
+        onNewMessage({
+          role: 'assistant',
+          content: errorMessage,
+          timestamp: new Date().toISOString()
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -163,9 +185,3 @@ const Chatbot = () => {
 };
 
 export default Chatbot;
-
-
-
-
-
-

@@ -14,15 +14,15 @@ class PromptService:
             with open(product_file_path, 'r', encoding='utf-8') as file:
                 return file.read()
         except FileNotFoundError:
-            print(f"警告: 产品信息文件未找到，请确保文件路径正确")
-            return "产品信息暂时不可用"
+            print(f"product information is updating...")
+            return "product information is updating..."
     
     def _create_system_prompt(self) -> str:
         """创建系统prompt"""
         return f"""You are a professional car loan advisor AI assistant. Your task is to help customers understand loan products and provide them with the most suitable loan recommendations.
 
 ## Your Role and Responsibilities:
-1. Answer customer questions about car loans in a friendly and professional manner
+1. Answer customer questions about loans in a friendly and professional manner
 2. Recommend the most suitable loan products based on customers' specific situations
 3. Clearly explain loan conditions, interest rates, application requirements, and other information
 4. Help customers understand the application process and required documents

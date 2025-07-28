@@ -23,7 +23,7 @@ class ProductMatchingService:
             "max_ask_attempts": 2,
             "tolerance_percentage": 10,
             "max_conversation_rounds": 3,
-            "timeout_seconds": 30,
+            "timeout_seconds": 100,
         }
     
     def _load_products(self) -> str:

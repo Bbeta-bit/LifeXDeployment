@@ -51,7 +51,7 @@ If Over $1 Million:
 5.	Detailed Business Background and List of Major Clients
 6.	Aged Debtor and Creditor Listing
 7.	Cashflow Projections (if Available)
-** Additional Notes**
+**Additional Notes**
 -Property Ownership:
 1. Non-property owners need 20% deposit
 2. Spousal property accepted w/ marriage/Medicare/utility bill
@@ -127,7 +127,7 @@ If Over $1 Million:
 13.	Detailed Business Background and List of Major Clients
 14.	Aged Debtor and Creditor Listing
 15.	Cashflow Projections (if Available)
-** Additional Notes**
+**Additional Notes**
 -Property Ownership:
 1. Non-property owners need 20% deposit
 2. Spousal property accepted w/ marriage/Medicare/utility bill
