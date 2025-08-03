@@ -1,560 +1,328 @@
-# main.py - Updated for Claude 4 Integration with Enhanced Services
+# main.py - 最终精简版本，基于你的unified_intelligent_service设计
+
 import os
-import requests
-import asyncio
+import sys
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.router import router as api_router
 
-# Enhanced Memory Service (Primary)
-try:
-    from app.services.enhanced_memory_conversation_service import EnhancedMemoryService, ConversationStage
-    ENHANCED_MEMORY_AVAILABLE = True
-    print("✅ Enhanced memory service loaded")
-except ImportError as e:
-    print(f"⚠️ Enhanced memory service not available: {e}")
-    ENHANCED_MEMORY_AVAILABLE = False
-
-# AI Service for Claude 4
-try:
-    from app.services.ai_service import UnifiedAIService, AIProvider
-    AI_SERVICE_AVAILABLE = True
-    print("✅ Unified AI service loaded")
-except ImportError as e:
-    print(f"⚠️ AI service not available: {e}")
-    AI_SERVICE_AVAILABLE = False
-
-# Enhanced Services
-try:
-    from app.services.enhanced_prompt_service import EnhancedPromptService
-    ENHANCED_PROMPT_AVAILABLE = True
-    print("✅ Enhanced prompt service loaded")
-except ImportError as e:
-    print(f"⚠️ Enhanced prompt service not available: {e}")
-    ENHANCED_PROMPT_AVAILABLE = False
-
-try:
-    from app.services.conversation_flow_service import EnhancedConversationFlowService
-    CONVERSATION_FLOW_AVAILABLE = True
-    print("✅ Enhanced conversation flow service loaded")
-except ImportError as e:
-    print(f"⚠️ Conversation flow service not available: {e}")
-    CONVERSATION_FLOW_AVAILABLE = False
-
-try:
-    from app.services.mvp_preference_extractor import MVPPreferenceExtractor
-    MVP_EXTRACTOR_AVAILABLE = True
-    print("✅ MVP preference extractor loaded")
-except ImportError as e:
-    print(f"⚠️ MVP preference extractor not available: {e}")
-    MVP_EXTRACTOR_AVAILABLE = False
-
-try:
-    from app.services.product_matching_service import ProductMatchingService
-    PRODUCT_MATCHING_AVAILABLE = True
-    print("✅ Product matching service loaded")
-except ImportError as e:
-    print(f"⚠️ Product matching service not available: {e}")
-    PRODUCT_MATCHING_AVAILABLE = False
-
-try:
-    from app.services.enhanced_customer_extractor import EnhancedCustomerInfoExtractor
-    CUSTOMER_EXTRACTOR_AVAILABLE = True
-    print("✅ Enhanced customer extractor loaded")
-except ImportError as e:
-    print(f"⚠️ Enhanced customer extractor not available: {e}")
-    CUSTOMER_EXTRACTOR_AVAILABLE = False
-
-# Load environment variables
+# 加载环境变量
 load_dotenv(dotenv_path="API.env")
 
-# Fallback OpenRouter API configuration
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-# Create FastAPI application
+# 创建FastAPI应用
 app = FastAPI(
-    title="Car Loan AI Agent - Claude 4 Enhanced",
-    description="AI agent backend with Claude 4, enhanced memory, and multi-lender support",
-    version="3.0-claude4-enhanced"
+    title="Car Loan AI Agent - Final Streamlined",
+    description="Streamlined AI loan advisor using unified intelligent service",
+    version="7.0-final-streamlined"
 )
 
-# CORS configuration
+# CORS配置
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://cmap-frontend.onrender.com",
-        "https://*.onrender.com"
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize services
-enhanced_memory_service = EnhancedMemoryService() if ENHANCED_MEMORY_AVAILABLE else None
-ai_service = UnifiedAIService() if AI_SERVICE_AVAILABLE else None
-enhanced_prompt_service = EnhancedPromptService() if ENHANCED_PROMPT_AVAILABLE else None
-conversation_flow_service = EnhancedConversationFlowService() if CONVERSATION_FLOW_AVAILABLE else None
-mvp_extractor = MVPPreferenceExtractor() if MVP_EXTRACTOR_AVAILABLE else None
-product_matcher = ProductMatchingService() if PRODUCT_MATCHING_AVAILABLE else None
-customer_extractor = EnhancedCustomerInfoExtractor() if CUSTOMER_EXTRACTOR_AVAILABLE else None
-
-# Configure AI service for Claude 4
-if AI_SERVICE_AVAILABLE and ai_service:
-    # Try to use Claude 4 through OpenRouter, fallback to Gemini
+# 尝试加载统一智能服务
+try:
+    # 假设unified_intelligent_service.py在app/services/目录下
+    sys.path.append('app/services')
+    from unified_intelligent_service import UnifiedIntelligentService
+    UNIFIED_SERVICE_AVAILABLE = True
+    print("✅ Unified Intelligent Service loaded")
+except ImportError:
     try:
-        ai_service.switch_provider(AIProvider.OPENROUTER, "claude")
-        print("✅ Configured for Claude 4 via OpenRouter")
-    except:
-        ai_service.switch_provider(AIProvider.OPENROUTER, "gemini_flash")
-        print("⚠️ Fallback to Gemini Flash")
+        # 或者直接在当前目录
+        from unified_intelligent_service import UnifiedIntelligentService
+        UNIFIED_SERVICE_AVAILABLE = True
+        print("✅ Unified Intelligent Service loaded from current directory")
+    except ImportError as e:
+        print(f"❌ Unified service not available: {e}")
+        UNIFIED_SERVICE_AVAILABLE = False
 
-app.include_router(api_router)
+# 检查Claude API配置
+CLAUDE_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+if not CLAUDE_API_KEY:
+    print("⚠️ ANTHROPIC_API_KEY not found in API.env")
+
+# 初始化服务
+unified_service = None
+if UNIFIED_SERVICE_AVAILABLE:
+    try:
+        unified_service = UnifiedIntelligentService()
+        print("✅ Unified service initialized")
+    except Exception as e:
+        print(f"❌ Failed to initialize unified service: {e}")
 
 @app.post("/chat")
 async def chat(request: Request):
-    """Enhanced chat endpoint with Claude 4, memory, and multi-lender support"""
+    """精简的聊天端点 - 使用你的unified intelligent service"""
     try:
         data = await request.json()
-        user_input = data.get("message")
+        user_message = data.get("message", "")
         session_id = data.get("session_id", "default")
         chat_history = data.get("history", [])
         
-        if not user_input:
-            raise HTTPException(status_code=400, detail="Message content cannot be empty")
-
-        # Enhanced memory context building
-        memory_context = ""
-        extracted_info = {}
-        conversation_state = None
+        if not user_message:
+            return {"reply": "Please provide a message", "status": "error"}
         
-        if ENHANCED_MEMORY_AVAILABLE and enhanced_memory_service:
-            # Create memory-aware context
-            memory_context = enhanced_memory_service.create_context_aware_prompt(session_id, user_input)
-            
-            # Get session memory
-            memory = enhanced_memory_service.get_or_create_session(session_id)
-            
-            # Extract customer information from conversation history
-            if CUSTOMER_EXTRACTOR_AVAILABLE and customer_extractor:
-                conversation_for_extraction = chat_history + [{"role": "user", "content": user_input}]
-                customer_info = await customer_extractor.extract_from_conversation(conversation_for_extraction)
-                
-                # Update memory with extracted info
-                for field in customer_info.extracted_fields:
-                    value = getattr(customer_info.personal_info, field, None) or \
-                           getattr(customer_info.business_info, field, None) or \
-                           getattr(customer_info.asset_info, field, None) or \
-                           getattr(customer_info.financial_info, field, None)
-                    if value is not None:
-                        memory.customer_info.update_field(field, value)
-            
-            # Get collected information from memory
-            collected_fields = {}
-            for field in memory.customer_info.confirmed_fields:
-                value = getattr(memory.customer_info, field, None)
-                if value is not None:
-                    collected_fields[field] = value
-            
-            extracted_info = {"mvp_fields": collected_fields, "preferences": {}}
-        
-        # Conversation flow management
-        if CONVERSATION_FLOW_AVAILABLE and conversation_flow_service:
-            if session_id not in conversation_states:
-                conversation_state = conversation_flow_service.init_conversation_state()
-            else:
-                conversation_state = conversation_states[session_id]
-            
-            # Update conversation state with extracted info
-            conversation_state = conversation_flow_service.update_conversation_state(
-                conversation_state, extracted_info
-            )
-            
-            conversation_states[session_id] = conversation_state
-        
-        # Build AI messages with enhanced prompts
-        messages = []
-        
-        # System prompt with memory and conversation context
-        if ENHANCED_PROMPT_AVAILABLE and enhanced_prompt_service and conversation_state:
-            context = conversation_flow_service.get_conversation_context(conversation_state)
-            system_prompt = enhanced_prompt_service.create_system_prompt(
-                conversation_state.stage, context
-            )
-        else:
-            system_prompt = f"""You are a professional loan advisor AI assistant with enhanced capabilities.
-
-## CORE PRINCIPLES:
-1. NEVER repeat questions about information the customer has already provided
-2. DO NOT repeat questions that were asked in recent conversation rounds
-3. Use existing information intelligently to advance the conversation
-4. Only ask for genuinely missing critical information
-
-## CURRENT MEMORY CONTEXT:
-{memory_context if memory_context else "No memory context available"}
-
-## YOUR TASK:
-- Respond intelligently based on the memory context above
-- Only ask for truly missing important information
-- Avoid ANY form of repetitive questioning
-- When sufficient information is available, recommend suitable loan products from ALL FOUR LENDERS: Angle, BFS, FCAU, and RAF
-- Always specify lender name clearly in recommendations: [Lender Name] - [Product Name]
-
-Please respond based on the above context and memory information."""
-
-        messages.append({"role": "system", "content": system_prompt})
-        
-        # Add conversation history (limit to avoid token overflow)
-        recent_history = chat_history[-8:] if len(chat_history) > 8 else chat_history
-        for chat in recent_history:
-            if "user" in chat and "assistant" in chat:
-                messages.append({"role": "user", "content": chat["user"]})
-                messages.append({"role": "assistant", "content": chat["assistant"]})
-        
-        # Add current user message
-        messages.append({"role": "user", "content": user_input})
-        
-        # Call AI service (Claude 4 or fallback)
-        response = None
-        if AI_SERVICE_AVAILABLE and ai_service:
-            response = await ai_service.call_ai(messages, temperature=0.7, max_tokens=1200)
-        
-        # Fallback to OpenRouter direct call
-        if not response:
-            response = await _call_openrouter_api(messages)
-        
-        if not response:
-            return _create_error_response("Failed to get AI response")
-        
-        # Update memory and conversation state
-        conversation_summary = {}
-        if ENHANCED_MEMORY_AVAILABLE and enhanced_memory_service:
-            memory = enhanced_memory_service.get_or_create_session(session_id)
-            memory.add_message("assistant", response)
-            conversation_summary = enhanced_memory_service.get_conversation_summary(session_id)
-        
-        # Product matching if sufficient information
-        matched_products_count = 0
-        product_matches = []
-        if PRODUCT_MATCHING_AVAILABLE and extracted_info.get("mvp_fields"):
-            mvp_fields = extracted_info["mvp_fields"]
-            if len(mvp_fields) >= 3:  # When enough information is available
-                try:
-                    matching_result = product_matcher.find_best_loan_product(
-                        user_profile=mvp_fields,
-                        soft_prefs=extracted_info.get("preferences", {})
-                    )
-                    matched_products_count = len(matching_result.get("matches", []))
-                    product_matches = matching_result.get("matches", [])
-                except Exception as e:
-                    print(f"Product matching error: {e}")
-        
-        return {
-            "reply": response,
-            "session_id": session_id,
-            "memory_summary": conversation_summary,
-            "extracted_info": extracted_info,
-            "matched_products_count": matched_products_count,
-            "conversation_stage": conversation_state.stage.value if conversation_state else "unknown",
-            "ai_provider": ai_service.get_current_config() if AI_SERVICE_AVAILABLE else "fallback",
-            "status": "success",
-            "features": {
-                "claude_4_support": AI_SERVICE_AVAILABLE,
-                "enhanced_memory": ENHANCED_MEMORY_AVAILABLE,
-                "anti_repetition": ENHANCED_MEMORY_AVAILABLE,
-                "context_aware": ENHANCED_MEMORY_AVAILABLE,
-                "conversation_flow": CONVERSATION_FLOW_AVAILABLE,
-                "mvp_extraction": MVP_EXTRACTOR_AVAILABLE,
-                "customer_extraction": CUSTOMER_EXTRACTOR_AVAILABLE,
-                "product_matching": PRODUCT_MATCHING_AVAILABLE,
-                "multi_lender_support": True
+        # 检查服务可用性
+        if not UNIFIED_SERVICE_AVAILABLE or not unified_service:
+            return {
+                "reply": "Service not available. Please check your unified_intelligent_service.py file.",
+                "status": "error",
+                "error_detail": "unified_intelligent_service not loaded"
             }
+        
+        if not CLAUDE_API_KEY:
+            return {
+                "reply": "Claude API not configured. Please check your API.env file.",
+                "status": "error",
+                "error_detail": "ANTHROPIC_API_KEY missing"
+            }
+        
+        # 使用你的统一智能服务处理对话
+        result = await unified_service.process_conversation(
+            user_message=user_message,
+            session_id=session_id,
+            chat_history=chat_history
+        )
+        
+        # 返回结果（保持与你的设计一致）
+        return {
+            "reply": result.get("reply"),
+            "session_id": result.get("session_id"),
+            "stage": result.get("stage"),
+            "customer_profile": result.get("customer_profile"),
+            "recommendations": result.get("recommendations", []),
+            "next_questions": result.get("next_questions", []),
+            "round_count": result.get("round_count"),
+            "status": result.get("status", "success"),
+            "ai_provider": "unified-intelligent-service",
+            "version": "7.0-final-streamlined"
         }
         
     except Exception as e:
-        print(f"Chat error: {e}")
-        return _create_error_response(f"Technical issue: {str(e)}")
+        print(f"❌ Chat error: {e}")
+        return {
+            "reply": "I'm experiencing technical difficulties. Please try again.",
+            "status": "error",
+            "error_detail": str(e)
+        }
 
-@app.post("/switch-ai-provider")
-async def switch_ai_provider(request: Request):
-    """Switch AI provider and model"""
-    try:
-        data = await request.json()
-        provider = data.get("provider", "openrouter")
-        model = data.get("model", "gemini_flash")
-        
-        if not AI_SERVICE_AVAILABLE or not ai_service:
-            return {
-                "status": "not_available",
-                "message": "AI service not loaded"
-            }
-        
-        try:
-            if provider == "openrouter":
-                ai_service.switch_provider(AIProvider.OPENROUTER, model)
-            elif provider == "google_studio":
-                ai_service.switch_provider(AIProvider.GOOGLE_STUDIO, model)
-            else:
-                return {
-                    "status": "error",
-                    "message": f"Unsupported provider: {provider}"
-                }
-            
-            return {
-                "status": "success",
-                "current_config": ai_service.get_current_config(),
-                "message": f"Switched to {provider} - {model}"
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": str(e)
-            }
+@app.get("/health")
+async def health_check():
+    """健康检查"""
+    service_status = "available" if UNIFIED_SERVICE_AVAILABLE and unified_service else "unavailable"
     
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # 检查产品文档加载状态
+    docs_status = {}
+    if unified_service:
+        try:
+            docs_status = {
+                lender: "loaded" if doc and len(doc) > 100 else "missing"
+                for lender, doc in unified_service.product_docs.items()
+            }
+        except:
+            docs_status = {"error": "could not check docs"}
+    
+    return {
+        "status": "healthy",
+        "version": "7.0-final-streamlined",
+        "unified_service": service_status,
+        "claude_api": "configured" if CLAUDE_API_KEY else "missing",
+        "product_docs": docs_status,
+        "features": {
+            "conversation_stages": UNIFIED_SERVICE_AVAILABLE,
+            "mvp_extraction": UNIFIED_SERVICE_AVAILABLE,
+            "product_matching": UNIFIED_SERVICE_AVAILABLE,
+            "round_limits": UNIFIED_SERVICE_AVAILABLE,
+            "preference_collection": UNIFIED_SERVICE_AVAILABLE
+        },
+        "design_philosophy": "Streamlined conversation with intelligent MVP collection and product matching"
+    }
 
-@app.post("/get-memory-status")
-async def get_memory_status(request: Request):
-    """Get comprehensive memory system status"""
+@app.get("/conversation-status/{session_id}")
+async def get_conversation_status(session_id: str):
+    """获取对话状态"""
+    if not unified_service:
+        return {"error": "Service not available"}
+    
+    try:
+        status = await unified_service.get_conversation_status(session_id)
+        return status
+    except Exception as e:
+        return {"error": f"Failed to get status: {str(e)}"}
+
+@app.post("/reset-conversation")
+async def reset_conversation(request: Request):
+    """重置对话"""
     try:
         data = await request.json()
         session_id = data.get("session_id", "default")
         
-        if not ENHANCED_MEMORY_AVAILABLE or not enhanced_memory_service:
-            return {
-                "status": "memory_not_available",
-                "message": "Enhanced memory service not loaded"
-            }
-        
-        summary = enhanced_memory_service.get_conversation_summary(session_id)
-        memory = enhanced_memory_service.get_or_create_session(session_id)
-        
-        return {
-            "status": "memory_available",
-            "session_summary": summary,
-            "anti_repetition_status": {
-                "asked_fields": list(memory.customer_info.asked_fields),
-                "confirmed_fields": list(memory.customer_info.confirmed_fields),
-                "recent_questions": memory.last_questions[-5:],
-                "conversation_rounds": memory.conversation_round
-            },
-            "next_recommended_questions": enhanced_memory_service.get_next_questions(session_id, max_questions=3),
-            "customer_profile": {
-                field: getattr(memory.customer_info, field) 
-                for field in memory.customer_info.confirmed_fields
-            }
-        }
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/extract-customer-info")
-async def extract_customer_info(request: Request):
-    """Extract comprehensive customer information"""
-    try:
-        data = await request.json()
-        conversation_history = data.get("conversation_history", [])
-        
-        if not CUSTOMER_EXTRACTOR_AVAILABLE or not customer_extractor:
-            return {
-                "status": "not_available",
-                "message": "Customer extractor not loaded"
-            }
-        
-        customer_info = await customer_extractor.extract_from_conversation(conversation_history)
+        if unified_service and hasattr(unified_service, 'conversation_states'):
+            if session_id in unified_service.conversation_states:
+                del unified_service.conversation_states[session_id]
         
         return {
             "status": "success",
-            "customer_info": {
-                "loan_type": customer_info.loan_type,
-                "personal_info": customer_info.personal_info.dict(),
-                "business_info": customer_info.business_info.dict(),
-                "asset_info": customer_info.asset_info.dict(),
-                "financial_info": customer_info.financial_info.dict(),
-                "extracted_fields": customer_info.extracted_fields,
-                "confidence_score": customer_info.confidence_score
-            },
-            "missing_fields": customer_extractor.get_missing_fields(customer_info),
-            "follow_up_questions": customer_extractor.generate_follow_up_questions(customer_info)
+            "message": f"Conversation {session_id} reset",
+            "session_id": session_id
         }
-    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/find-products-multi-lender")
-async def find_products_multi_lender(request: Request):
-    """Find products across all lenders"""
-    try:
-        data = await request.json()
-        user_profile = data.get("user_profile", {})
-        preferences = data.get("preferences", {})
-        
-        if not PRODUCT_MATCHING_AVAILABLE or not product_matcher:
-            return {
-                "status": "not_available",
-                "message": "Product matching service not loaded"
-            }
-        
-        result = product_matcher.find_best_loan_product(
-            user_profile=user_profile,
-            soft_prefs=preferences
-        )
-        
         return {
-            **result,
-            "lenders_checked": ["Angle", "BFS", "FCAU", "RAF"],
-            "service_type": "multi_lender"
+            "status": "error",
+            "message": str(e)
         }
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "message": "Car Loan AI Agent - Claude 4 Enhanced",
-        "version": "3.0-claude4-enhanced",
-        "ai_provider": ai_service.get_current_config() if AI_SERVICE_AVAILABLE else "fallback",
-        "features": {
-            "claude_4_support": AI_SERVICE_AVAILABLE,
-            "enhanced_memory": ENHANCED_MEMORY_AVAILABLE,
-            "anti_repetition": ENHANCED_MEMORY_AVAILABLE,
-            "context_awareness": ENHANCED_MEMORY_AVAILABLE,
-            "enhanced_prompt": ENHANCED_PROMPT_AVAILABLE,
-            "conversation_flow": CONVERSATION_FLOW_AVAILABLE,
-            "mvp_extraction": MVP_EXTRACTOR_AVAILABLE,
-            "customer_extraction": CUSTOMER_EXTRACTOR_AVAILABLE,
-            "product_matching": PRODUCT_MATCHING_AVAILABLE,
-            "multi_lender_support": True
-        },
-        "lenders_supported": ["Angle", "BFS", "FCAU", "RAF"],
-        "ai_capabilities": {
-            "providers_available": ["OpenRouter", "Google Studio"] if AI_SERVICE_AVAILABLE else ["OpenRouter Fallback"],
-            "models_available": ["Claude 4", "Gemini Flash", "GPT-4"] if AI_SERVICE_AVAILABLE else ["Gemini Flash"]
-        }
-    }
-
-@app.get("/system-status")
-async def system_status():
-    """Comprehensive system status"""
-    return {
-        "timestamp": "2025-08-03",
-        "version": "3.0-claude4-enhanced",
-        "services": {
-            "ai_service": {
-                "available": AI_SERVICE_AVAILABLE,
-                "current_provider": ai_service.get_current_config() if AI_SERVICE_AVAILABLE else None,
-                "status": "loaded" if AI_SERVICE_AVAILABLE else "not_found"
-            },
-            "enhanced_memory_service": {
-                "available": ENHANCED_MEMORY_AVAILABLE,
-                "status": "loaded" if ENHANCED_MEMORY_AVAILABLE else "not_found",
-                "active_sessions": len(enhanced_memory_service.sessions) if ENHANCED_MEMORY_AVAILABLE else 0
-            },
-            "enhanced_prompt_service": {
-                "available": ENHANCED_PROMPT_AVAILABLE,
-                "status": "loaded" if ENHANCED_PROMPT_AVAILABLE else "not_found"
-            },
-            "conversation_flow_service": {
-                "available": CONVERSATION_FLOW_AVAILABLE,
-                "status": "loaded" if CONVERSATION_FLOW_AVAILABLE else "not_found"
-            },
-            "mvp_preference_extractor": {
-                "available": MVP_EXTRACTOR_AVAILABLE,
-                "status": "loaded" if MVP_EXTRACTOR_AVAILABLE else "not_found"
-            },
-            "customer_extractor": {
-                "available": CUSTOMER_EXTRACTOR_AVAILABLE,
-                "status": "loaded" if CUSTOMER_EXTRACTOR_AVAILABLE else "not_found"
-            },
-            "product_matching_service": {
-                "available": PRODUCT_MATCHING_AVAILABLE,
-                "status": "loaded" if PRODUCT_MATCHING_AVAILABLE else "not_found"
-            }
-        },
-        "functionality": {
-            "claude_4_ai": AI_SERVICE_AVAILABLE,
-            "enhanced_memory": ENHANCED_MEMORY_AVAILABLE,
-            "anti_repetition": ENHANCED_MEMORY_AVAILABLE,
-            "conversation_management": CONVERSATION_FLOW_AVAILABLE,
-            "customer_extraction": CUSTOMER_EXTRACTOR_AVAILABLE,
-            "product_matching": PRODUCT_MATCHING_AVAILABLE,
-            "multi_lender_support": True
-        },
-        "recommendations": {
-            "production_ready": all([
-                AI_SERVICE_AVAILABLE,
-                ENHANCED_MEMORY_AVAILABLE,
-                CONVERSATION_FLOW_AVAILABLE,
-                PRODUCT_MATCHING_AVAILABLE
-            ]),
-            "missing_services": [
-                service for service, available in [
-                    ("ai_service", AI_SERVICE_AVAILABLE),
-                    ("enhanced_memory", ENHANCED_MEMORY_AVAILABLE),
-                    ("conversation_flow", CONVERSATION_FLOW_AVAILABLE),
-                    ("product_matching", PRODUCT_MATCHING_AVAILABLE)
-                ] if not available
+@app.get("/test-service")
+async def test_service():
+    """测试统一服务功能"""
+    if not unified_service:
+        return {
+            "status": "error",
+            "message": "Unified service not available",
+            "recommendations": [
+                "Check if unified_intelligent_service.py exists",
+                "Ensure all dependencies are installed",
+                "Check the file path and imports"
             ]
         }
-    }
-
-# Store conversation states
-conversation_states = {}
-
-# Helper functions
-
-async def _call_openrouter_api(messages: list) -> str:
-    """Fallback OpenRouter API call"""
+    
     try:
-        if not OPENROUTER_API_KEY:
-            return "API key not configured. Please check your environment settings."
+        # 测试基本功能
+        test_session = "test_session"
+        test_message = "Hi, I need a business loan for a truck. I own property and have good credit."
         
-        headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
+        result = await unified_service.process_conversation(
+            user_message=test_message,
+            session_id=test_session,
+            chat_history=[]
+        )
+        
+        # 清理测试会话
+        if test_session in unified_service.conversation_states:
+            del unified_service.conversation_states[test_session]
+        
+        return {
+            "status": "success",
+            "test_result": {
+                "response_generated": bool(result.get("reply")),
+                "stage_detected": result.get("stage"),
+                "round_count": result.get("round_count"),
+                "has_questions": bool(result.get("next_questions")),
+                "response_length": len(result.get("reply", ""))
+            },
+            "sample_response": result.get("reply", "")[:200] + "..." if len(result.get("reply", "")) > 200 else result.get("reply", ""),
+            "message": "Service working correctly"
         }
-
-        payload = {
-            "model": "google/gemini-2.0-flash-exp:free",
-            "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": 1200
-        }
-
-        response = requests.post(OPENROUTER_API_URL, headers=headers, json=payload)
-
-        if response.status_code != 200:
-            print(f"OpenRouter API error: {response.status_code} - {response.text}")
-            return "I'm experiencing connectivity issues. Please try again later."
-
-        result = response.json()
-        return result['choices'][0]['message']['content']
         
     except Exception as e:
-        print(f"OpenRouter API call failed: {e}")
-        return "I'm having technical difficulties. Please try again."
-
-def _create_error_response(error_message: str) -> dict:
-    """Create standardized error response"""
-    return {
-        "reply": "I apologize, but I'm experiencing a technical issue. Please try again or contact our support team if the problem persists.",
-        "status": "error",
-        "error_detail": error_message,
-        "features": {
-            "claude_4_support": AI_SERVICE_AVAILABLE,
-            "enhanced_memory": False,
-            "anti_repetition": False,
-            "context_awareness": False
+        return {
+            "status": "error",
+            "message": f"Service test failed: {str(e)}",
+            "recommendations": [
+                "Check Claude API key in API.env",
+                "Verify product documentation files exist",
+                "Check internet connection for API calls"
+            ]
         }
+
+@app.get("/debug-info")
+async def debug_info():
+    """调试信息"""
+    debug_data = {
+        "environment": {
+            "python_path": sys.path,
+            "current_directory": os.getcwd(),
+            "api_env_exists": os.path.exists("API.env"),
+            "claude_api_configured": bool(CLAUDE_API_KEY)
+        },
+        "service_status": {
+            "unified_service_available": UNIFIED_SERVICE_AVAILABLE,
+            "service_initialized": unified_service is not None
+        },
+        "recommendations": []
     }
+    
+    # 生成调试建议
+    if not UNIFIED_SERVICE_AVAILABLE:
+        debug_data["recommendations"].append("Place unified_intelligent_service.py in the same directory as main.py or in app/services/")
+    
+    if not CLAUDE_API_KEY:
+        debug_data["recommendations"].append("Add ANTHROPIC_API_KEY to your API.env file")
+    
+    if unified_service:
+        try:
+            debug_data["product_docs"] = {
+                lender: len(doc) for lender, doc in unified_service.product_docs.items()
+            }
+            debug_data["conversation_states"] = len(unified_service.conversation_states)
+        except:
+            debug_data["service_error"] = "Could not access service properties"
+    
+    return debug_data
 
 if __name__ == "__main__":
     import uvicorn
+    
+    print("🚀 Starting Final Streamlined Car Loan AI Agent")
+    print(f"Unified Service: {'✅' if UNIFIED_SERVICE_AVAILABLE else '❌'}")
+    print(f"Claude API: {'✅' if CLAUDE_API_KEY else '❌'}")
+    
+    if not UNIFIED_SERVICE_AVAILABLE:
+        print("\n⚠️ unified_intelligent_service.py not found!")
+        print("📁 Please ensure the file is in one of these locations:")
+        print("   - Same directory as main.py")
+        print("   - app/services/unified_intelligent_service.py")
+    
+    if not CLAUDE_API_KEY:
+        print("\n⚠️ Claude API key not configured!")
+        print("📝 Add to API.env: ANTHROPIC_API_KEY=sk-ant-your-key-here")
+    
+    if UNIFIED_SERVICE_AVAILABLE and CLAUDE_API_KEY:
+        print("\n✅ All systems ready!")
+        print("🎯 Features enabled:")
+        print("   - Intelligent conversation stages")
+        print("   - MVP field extraction")
+        print("   - Product matching with Claude")
+        print("   - 4-round conversation limit")
+        print("   - Preference collection")
+    
+    print(f"\n🌐 Starting server on http://localhost:8000")
+    print("📋 API endpoints:")
+    print("   POST /chat - Main chat endpoint")
+    print("   GET /health - Health check")
+    print("   GET /test-service - Test service functionality")
+    print("   GET /debug-info - Debug information")
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# 额外的工具函数
+def check_file_structure():
+    """检查文件结构"""
+    files_to_check = [
+        "unified_intelligent_service.py",
+        "app/services/unified_intelligent_service.py",
+        "API.env",
+        "Angle.md",
+        "BFS.md",
+        "FCAU.md",
+        "RAF.md"
+    ]
+    
+    status = {}
+    for file_path in files_to_check:
+        status[file_path] = "✅ Found" if os.path.exists(file_path) else "❌ Missing"
+    
+    return status
+
+# 运行前的文件检查
+if __name__ == "__main__":
+    print("\n📁 File Structure Check:")
+    file_status = check_file_structure()
+    for file_path, status in file_status.items():
+        print(f"   {file_path}: {status}")
