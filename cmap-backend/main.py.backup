@@ -1,0 +1,506 @@
+# main.py - Fixed with correct import paths
+import os
+import requests
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.router import router as api_router
+
+# Import enhanced memory service from root directory
+try:
+    from enhanced_memory_conversation_service import EnhancedMemoryService, ConversationStage
+    ENHANCED_MEMORY_AVAILABLE = True
+    print("✅ Enhanced memory service loaded")
+except ImportError as e:
+    print(f"⚠️ Enhanced memory service not available: {e}")
+    ENHANCED_MEMORY_AVAILABLE = False
+
+# Import existing services from app.services
+try:
+    from app.services.enhanced_prompt_service import EnhancedPromptService
+    ENHANCED_PROMPT_AVAILABLE = True
+    print("✅ Enhanced prompt service loaded")
+except ImportError as e:
+    print(f"⚠️ Enhanced prompt service not available: {e}")
+    ENHANCED_PROMPT_AVAILABLE = False
+
+try:
+    from app.services.conversation_flow_service import ConversationFlowService
+    CONVERSATION_FLOW_AVAILABLE = True
+    print("✅ Conversation flow service loaded")
+except ImportError as e:
+    print(f"⚠️ Conversation flow service not available: {e}")
+    CONVERSATION_FLOW_AVAILABLE = False
+
+try:
+    from app.services.mvp_preference_extractor import MVPPreferenceExtractor
+    MVP_EXTRACTOR_AVAILABLE = True
+    print("✅ MVP extractor loaded")
+except ImportError as e:
+    print(f"⚠️ MVP extractor not available: {e}")
+    MVP_EXTRACTOR_AVAILABLE = False
+    class MVPPreferenceExtractor:
+        async def extract_mvp_and_preferences(self, conversation_history):
+            return {"mvp_fields": {}, "preferences": {}}
+
+try:
+    from app.services.product_matching_service import ProductMatchingService
+    PRODUCT_MATCHING_AVAILABLE = True
+    print("✅ Product matching service loaded")
+except ImportError as e:
+    print(f"⚠️ Product matching service not available: {e}")
+    PRODUCT_MATCHING_AVAILABLE = False
+    class ProductMatchingService:
+        def find_best_loan_product(self, user_profile, soft_prefs=None):
+            return {"status": "service_unavailable", "matches": []}
+
+# Try to import enhanced multi-lender services
+try:
+    from app.services.enhanced_product_matching_service import (
+        IntegratedLoanMatchingService,
+        MultiLenderProductMatcher,
+        MonthlyPaymentCalculator
+    )
+    MULTI_LENDER_AVAILABLE = True
+    print("✅ Multi-lender services loaded")
+except ImportError as e:
+    print(f"⚠️ Multi-lender services not available: {e}")
+    MULTI_LENDER_AVAILABLE = False
+
+# Load environment variables
+load_dotenv(dotenv_path="API.env")
+
+# OpenRouter API configuration
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Create FastAPI application
+app = FastAPI(
+    title="Car Loan AI Agent with Enhanced Memory",
+    description="AI agent backend with comprehensive multi-lender support",
+    version="2.1-multi-lender-enhanced"
+)
+
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "https://cmap-frontend.onrender.com",
+        "https://*.onrender.com"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize services
+enhanced_memory_service = EnhancedMemoryService() if ENHANCED_MEMORY_AVAILABLE else None
+
+if ENHANCED_PROMPT_AVAILABLE:
+    prompt_service = EnhancedPromptService()
+else:
+    try:
+        from app.services.prompt_service import PromptService
+        prompt_service = PromptService()
+        print("✅ Using basic prompt service")
+    except ImportError:
+        print("❌ No prompt service available")
+        prompt_service = None
+
+if CONVERSATION_FLOW_AVAILABLE:
+    flow_service = ConversationFlowService()
+else:
+    flow_service = None
+
+mvp_extractor = MVPPreferenceExtractor()
+product_matcher = ProductMatchingService()
+
+# Initialize multi-lender services if available
+if MULTI_LENDER_AVAILABLE:
+    try:
+        integrated_matcher = IntegratedLoanMatchingService()
+        multi_lender_matcher = MultiLenderProductMatcher()
+        payment_calculator = MonthlyPaymentCalculator()
+        print("✅ Multi-lender matching system ready")
+    except Exception as e:
+        print(f"⚠️ Error initializing multi-lender services: {e}")
+        MULTI_LENDER_AVAILABLE = False
+
+app.include_router(api_router)
+
+@app.post("/chat")
+async def chat(request: Request):
+    """Enhanced chat endpoint with memory, multi-lender support and detailed product recommendations"""
+    try:
+        data = await request.json()
+        user_input = data.get("message")
+        session_id = data.get("session_id", "default")
+        chat_history = data.get("history", [])
+        
+        if not user_input:
+            raise HTTPException(status_code=400, detail="Message content cannot be empty")
+
+        # Enhanced memory processing
+        memory_context = ""
+        extracted_info = {}
+        
+        if ENHANCED_MEMORY_AVAILABLE and enhanced_memory_service:
+            # Create memory-aware context
+            memory_context = enhanced_memory_service.create_context_aware_prompt(session_id, user_input)
+            
+            # Get session memory
+            memory = enhanced_memory_service.get_or_create_session(session_id)
+            
+            # Extract collected information
+            collected_fields = {}
+            for field in memory.customer_info.confirmed_fields:
+                value = getattr(memory.customer_info, field, None)
+                if value is not None:
+                    collected_fields[field] = value
+            
+            extracted_info = {"mvp_fields": collected_fields, "preferences": {}}
+        
+        # Fallback extraction
+        elif MVP_EXTRACTOR_AVAILABLE and mvp_extractor:
+            conversation_for_extraction = chat_history + [{"role": "user", "content": user_input}]
+            extracted_info = await mvp_extractor.extract_mvp_and_preferences(conversation_for_extraction)
+        
+        # Build enhanced system prompt
+        if ENHANCED_MEMORY_AVAILABLE and enhanced_memory_service:
+            system_prompt = f"""You are a professional loan advisor AI assistant with enhanced memory and multi-lender product matching capabilities.
+
+## CORE PRINCIPLES:
+1. NEVER repeat questions about information the customer has already provided
+2. DO NOT repeat questions that were asked in recent conversation rounds
+3. Use existing information intelligently to advance the conversation
+4. When sufficient information is available, provide detailed product recommendations with calculations
+
+## CURRENT MEMORY CONTEXT:
+{memory_context}
+
+## PRODUCT RECOMMENDATION REQUIREMENTS:
+When recommending products, always include:
+- Specific lender name and product name
+- Base interest rate AND comparison rate
+- Monthly payment calculation (if loan amount and term available)
+- All fees breakdown
+- Eligibility requirements and how customer meets them
+- Complete product details
+
+## YOUR TASK:
+- Respond intelligently based on memory context
+- Only ask for truly missing critical information
+- Avoid ANY form of repetitive questioning
+- When sufficient information exists, provide comprehensive product recommendations with all calculations
+
+Please respond based on the above context and provide detailed, actionable advice."""
+        else:
+            system_prompt = """You are a professional loan advisor AI assistant. Help customers understand loan products and provide detailed recommendations.
+
+When recommending products, always include:
+- Specific lender and product names
+- Interest rates and comparison rates
+- Monthly payment calculations
+- All fees and requirements
+- Complete eligibility assessment
+
+Please avoid repeating questions about information already provided."""
+
+        # Build messages
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # Add conversation history (limit to avoid token overflow)
+        recent_history = chat_history[-8:] if len(chat_history) > 8 else chat_history
+        for chat in recent_history:
+            if "user" in chat and "assistant" in chat:
+                messages.append({"role": "user", "content": chat["user"]})
+                messages.append({"role": "assistant", "content": chat["assistant"]})
+        
+        # Add current user message
+        messages.append({"role": "user", "content": user_input})
+        
+        # Call AI
+        response = await _call_openrouter_api(messages)
+        
+        if not response:
+            return _create_error_response("Failed to get AI response")
+        
+        # Update memory if available
+        conversation_summary = {}
+        if ENHANCED_MEMORY_AVAILABLE and enhanced_memory_service:
+            memory = enhanced_memory_service.get_or_create_session(session_id)
+            memory.add_message("assistant", response)
+            conversation_summary = enhanced_memory_service.get_conversation_summary(session_id)
+        
+        # Enhanced product matching with detailed information
+        matched_products_info = []
+        matched_products_count = 0
+        
+        if extracted_info.get("mvp_fields"):
+            mvp_fields = extracted_info["mvp_fields"]
+            
+            # Try multi-lender matching first
+            if MULTI_LENDER_AVAILABLE and len(mvp_fields) >= 3:
+                try:
+                    conversation_for_matching = chat_history + [{"role": "user", "content": user_input}]
+                    matching_result = await integrated_matcher.process_loan_request(
+                        conversation_history=conversation_for_matching,
+                        user_preferences=extracted_info.get("preferences", {})
+                    )
+                    
+                    if matching_result.get("matches"):
+                        matched_products_info = matching_result["matches"]
+                        matched_products_count = len(matched_products_info)
+                        
+                        # If products found but not included in response, append details
+                        if matched_products_count > 0 and "5.99%" not in response:
+                            product_details = _format_product_details(matched_products_info[0])
+                            response += f"\n\n{product_details}"
+                            
+                except Exception as e:
+                    print(f"Multi-lender matching error: {e}")
+            
+            # Fallback to single lender matching
+            if matched_products_count == 0 and PRODUCT_MATCHING_AVAILABLE and len(mvp_fields) >= 2:
+                try:
+                    matching_result = product_matcher.find_best_loan_product(
+                        user_profile=mvp_fields,
+                        soft_prefs=extracted_info.get("preferences", {})
+                    )
+                    matched_products_count = len(matching_result.get("matches", []))
+                    if matching_result.get("matches"):
+                        matched_products_info = matching_result["matches"]
+                except Exception as e:
+                    print(f"Single lender matching error: {e}")
+        
+        return {
+            "reply": response,
+            "session_id": session_id,
+            "memory_summary": conversation_summary,
+            "extracted_info": extracted_info,
+            "matched_products_count": matched_products_count,
+            "matched_products_details": matched_products_info[:3] if matched_products_info else [],
+            "status": "success",
+            "features": {
+                "enhanced_memory": ENHANCED_MEMORY_AVAILABLE,
+                "anti_repetition": ENHANCED_MEMORY_AVAILABLE,
+                "context_aware": ENHANCED_MEMORY_AVAILABLE,
+                "multi_lender_matching": MULTI_LENDER_AVAILABLE,
+                "detailed_calculations": True,
+                "mvp_extraction": MVP_EXTRACTOR_AVAILABLE,
+                "product_matching": PRODUCT_MATCHING_AVAILABLE
+            }
+        }
+        
+    except Exception as e:
+        print(f"Chat error: {e}")
+        return _create_error_response(f"Technical issue: {str(e)}")
+
+def _format_product_details(product_match) -> str:
+    """Format detailed product information for response"""
+    try:
+        if hasattr(product_match, 'product_name'):
+            details = f"""
+
+## Recommended Product Details
+
+**{product_match.lender_name} - {product_match.product_name}**
+- **Base Rate**: {product_match.interest_rate}%
+- **Comparison Rate**: {product_match.comparison_rate}% (includes fees)
+- **Maximum Loan Amount**: ${product_match.loan_amount_max:,}
+- **Loan Terms**: {product_match.loan_term_options}
+
+**Monthly Payment**: ${product_match.monthly_payment:,.2f} (estimated)
+
+**Fees Breakdown**:
+{_format_fees(product_match.fees_breakdown)}
+
+**Eligibility Status**: {'✅ All requirements met' if product_match.all_requirements_met else '⚠️ Some requirements need verification'}
+
+**Why this product**: {', '.join(product_match.reasons)}
+"""
+        else:
+            details = f"""
+## Product Recommendation Available
+Based on your information, I can recommend suitable loan products. Please provide any missing details for a complete assessment.
+"""
+        return details
+    except Exception as e:
+        print(f"Error formatting product details: {e}")
+        return ""
+
+def _format_fees(fees_dict) -> str:
+    """Format fees breakdown"""
+    if not fees_dict:
+        return "- No additional fees specified"
+    
+    formatted_fees = []
+    for fee_name, fee_amount in fees_dict.items():
+        formatted_name = fee_name.replace('_', ' ').title()
+        formatted_fees.append(f"- {formatted_name}: ${fee_amount:,.2f}")
+    
+    return '\n'.join(formatted_fees)
+
+# Keep all existing endpoints
+@app.post("/get-memory-status")
+async def get_memory_status(request: Request):
+    """Get memory system status"""
+    try:
+        data = await request.json()
+        session_id = data.get("session_id", "default")
+        
+        if not ENHANCED_MEMORY_AVAILABLE or not enhanced_memory_service:
+            return {
+                "status": "memory_not_available",
+                "message": "Enhanced memory service not loaded"
+            }
+        
+        summary = enhanced_memory_service.get_conversation_summary(session_id)
+        memory = enhanced_memory_service.get_or_create_session(session_id)
+        
+        return {
+            "status": "memory_available",
+            "session_summary": summary,
+            "anti_repetition_status": {
+                "asked_fields": list(memory.customer_info.asked_fields),
+                "confirmed_fields": list(memory.customer_info.confirmed_fields),
+                "recent_questions": memory.last_questions[-5:],
+                "conversation_rounds": memory.conversation_round
+            },
+            "next_recommended_questions": enhanced_memory_service.get_next_questions(session_id, max_questions=3)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/reset-memory")
+async def reset_memory(request: Request):
+    """Reset memory system"""
+    try:
+        data = await request.json()
+        session_id = data.get("session_id", "default")
+        
+        if ENHANCED_MEMORY_AVAILABLE and enhanced_memory_service:
+            enhanced_memory_service.clear_session(session_id)
+            return {
+                "status": "success",
+                "message": f"Memory cleared for session {session_id}"
+            }
+        else:
+            return {
+                "status": "not_available",
+                "message": "Enhanced memory service not available"
+            }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "message": "Car Loan AI Agent with Enhanced Memory and Multi-Lender Support",
+        "version": "2.1-multi-lender-enhanced",
+        "features": {
+            "enhanced_memory": ENHANCED_MEMORY_AVAILABLE,
+            "anti_repetition": ENHANCED_MEMORY_AVAILABLE,
+            "context_awareness": ENHANCED_MEMORY_AVAILABLE,
+            "multi_lender_matching": MULTI_LENDER_AVAILABLE,
+            "detailed_calculations": True,
+            "enhanced_prompt": ENHANCED_PROMPT_AVAILABLE,
+            "conversation_flow": CONVERSATION_FLOW_AVAILABLE,
+            "mvp_extraction": MVP_EXTRACTOR_AVAILABLE,
+            "product_matching": PRODUCT_MATCHING_AVAILABLE
+        }
+    }
+
+@app.get("/service-status")
+async def service_status():
+    """Detailed service availability status"""
+    return {
+        "timestamp": "2025-08-03",
+        "services": {
+            "enhanced_memory_service": {
+                "available": ENHANCED_MEMORY_AVAILABLE,
+                "status": "loaded" if ENHANCED_MEMORY_AVAILABLE else "not_found",
+                "location": "root directory"
+            },
+            "multi_lender_services": {
+                "available": MULTI_LENDER_AVAILABLE,
+                "status": "loaded" if MULTI_LENDER_AVAILABLE else "not_found",
+                "features": ["4_lender_support", "detailed_calculations", "comparison_rates"] if MULTI_LENDER_AVAILABLE else []
+            },
+            "enhanced_prompt_service": {
+                "available": ENHANCED_PROMPT_AVAILABLE,
+                "status": "loaded" if ENHANCED_PROMPT_AVAILABLE else "not_found"
+            },
+            "conversation_flow_service": {
+                "available": CONVERSATION_FLOW_AVAILABLE,
+                "status": "loaded" if CONVERSATION_FLOW_AVAILABLE else "using_fallback"
+            },
+            "mvp_preference_extractor": {
+                "available": MVP_EXTRACTOR_AVAILABLE,
+                "status": "loaded" if MVP_EXTRACTOR_AVAILABLE else "using_fallback"
+            },
+            "product_matching_service": {
+                "available": PRODUCT_MATCHING_AVAILABLE,
+                "status": "loaded" if PRODUCT_MATCHING_AVAILABLE else "using_fallback"
+            }
+        },
+        "product_data": {
+            "lenders_available": ["Angle", "BFS", "FCAU", "RAF"],
+            "data_location": "docs/ folder",
+            "files_required": ["Angle.md", "BFS.md", "FCAU.md", "RAF.md"]
+        }
+    }
+
+# Helper functions
+async def _call_openrouter_api(messages: list) -> str:
+    """Call OpenRouter API and return response"""
+    try:
+        if not OPENROUTER_API_KEY:
+            return "API key not configured. Please check your environment settings."
+        
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": "google/gemini-2.0-flash-exp:free",
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 1500  # Increased for detailed responses
+        }
+
+        response = requests.post(OPENROUTER_API_URL, headers=headers, json=payload)
+
+        if response.status_code != 200:
+            print(f"OpenRouter API error: {response.status_code} - {response.text}")
+            return "I'm experiencing connectivity issues. Please try again later."
+
+        result = response.json()
+        return result['choices'][0]['message']['content']
+        
+    except Exception as e:
+        print(f"OpenRouter API call failed: {e}")
+        return "I'm having technical difficulties. Please try again."
+
+def _create_error_response(error_message: str) -> dict:
+    """Create standardized error response"""
+    return {
+        "reply": "I apologize, but I'm experiencing a technical issue. Please try again or contact our support team if the problem persists.",
+        "status": "error",
+        "error_detail": error_message,
+        "features": {
+            "enhanced_memory": ENHANCED_MEMORY_AVAILABLE,
+            "multi_lender_matching": MULTI_LENDER_AVAILABLE,
+            "anti_repetition": False,
+            "context_awareness": False
+        }
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

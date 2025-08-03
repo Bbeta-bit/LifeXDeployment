@@ -6,12 +6,19 @@ from dataclasses import dataclass
 @dataclass
 class ProductMatch:
     product_name: str
+    lender_name: str
     interest_rate: float
+    comparison_rate: Optional[float]
     loan_amount_max: str
+    loan_term_options: str
     match_score: float
     reasons: List[str]
     gaps: List[str]
     requirements: Dict[str, Any]
+    monthly_payment: Optional[float]
+    fees_breakdown: Dict[str, Any]
+    all_requirements_met: bool
+    eligibility_details: Dict[str, Any]
 
 class ProductMatchingService:
     def __init__(self):
@@ -61,57 +68,94 @@ class ProductMatchingService:
         
         product = {
             "name": product_name,
+            "lender": self._extract_lender_name(product_name),
             "interest_rate": None,
             "loan_amount": None,
+            "loan_term": None,
             "abn_years": None,
             "gst_years": None,
             "credit_score_min": None,
             "property_required": None,
-            "low_doc_conditions": {},
-            "full_doc_conditions": {},
-            "additional_notes": {},
+            "fees": {},
+            "requirements": {},
             "raw_content": section
         }
         
         # Extract interest rate
-        rate_match = re.search(r'\*\*Interest Rate\*\*:\s*([\d.]+)%', section)
+        rate_match = re.search(r'(?:Interest Rate|Base Rate|Rate).*?(\d+\.?\d*)%', section, re.IGNORECASE)
         if rate_match:
             product["interest_rate"] = float(rate_match.group(1))
         
         # Extract loan amount
-        amount_match = re.search(r'\*\*Loan Amount\*\*:\s*(.+)', section)
+        amount_match = re.search(r'(?:Loan Amount|Maximum|Max).*?(?:\$)?([\d,]+)', section, re.IGNORECASE)
         if amount_match:
-            product["loan_amount"] = amount_match.group(1).strip()
+            product["loan_amount"] = amount_match.group(1).replace(',', '')
+        
+        # Extract loan term
+        term_match = re.search(r'(?:Term|Years).*?(\d+)', section, re.IGNORECASE)
+        if term_match:
+            product["loan_term"] = int(term_match.group(1))
         
         # Extract ABN requirements
-        abn_match = re.search(r'ABN:\s*≥?\s*(\d+)\s*years?', section, re.IGNORECASE)
+        abn_match = re.search(r'ABN.*?(\d+)\s*years?', section, re.IGNORECASE)
         if abn_match:
             product["abn_years"] = int(abn_match.group(1))
         
         # Extract GST requirements
-        gst_match = re.search(r'GST:\s*≥?\s*(\d+)\s*years?', section, re.IGNORECASE)
+        gst_match = re.search(r'GST.*?(\d+)\s*years?', section, re.IGNORECASE)
         if gst_match:
             product["gst_years"] = int(gst_match.group(1))
         
         # Extract credit score requirements
-        credit_matches = re.findall(r'Credit Score[^:]*:\s*(\d+)-?(\d+)?', section, re.IGNORECASE)
-        if credit_matches:
-            # Take the minimum credit score from all matches
-            min_scores = [int(match[0]) for match in credit_matches]
-            product["credit_score_min"] = min(min_scores)
+        credit_match = re.search(r'Credit Score.*?(\d+)', section, re.IGNORECASE)
+        if credit_match:
+            product["credit_score_min"] = int(credit_match.group(1))
         
-        # Check if property is required
+        # Extract property requirement
         if "property owner" in product_name.lower() or "property backed" in section.lower():
             product["property_required"] = True
         elif "non-property owner" in product_name.lower():
             product["property_required"] = False
         
+        # Extract fees
+        product["fees"] = self._extract_fees(section)
+        
         return product
+    
+    def _extract_lender_name(self, product_name: str) -> str:
+        """Extract lender name from product name"""
+        lenders = ["Angle", "BFS", "FCAU", "RAF"]
+        for lender in lenders:
+            if lender.lower() in product_name.lower():
+                return lender
+        return "Unknown"
+    
+    def _extract_fees(self, content: str) -> Dict[str, float]:
+        """Extract fees from product content"""
+        fees = {}
+        
+        # Common fee patterns
+        fee_patterns = {
+            "establishment_fee": r'Establishment.*?\$?([\d,]+)',
+            "account_fee": r'Account.*?Fee.*?\$?([\d.]+)',
+            "origination_fee": r'Origination.*?\$?([\d,]+)',
+            "brokerage_fee": r'Brokerage.*?\$?([\d,]+)',
+        }
+        
+        for fee_name, pattern in fee_patterns.items():
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                try:
+                    fees[fee_name] = float(match.group(1).replace(',', ''))
+                except ValueError:
+                    continue
+        
+        return fees
     
     def find_best_loan_product(self, user_profile: Dict[str, Any], 
                               soft_prefs: Dict[str, Any] = None,
                               refine_params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Main function to find best matching products"""
+        """Find the LOWEST RATE product that matches customer requirements"""
         
         if not self.products_parsed:
             return {
@@ -121,27 +165,28 @@ class ProductMatchingService:
             }
         
         try:
-            # Step 1: Hard filtering based on MVP requirements
+            # Step 1: Find ALL eligible products
             eligible_products = self._hard_filter(user_profile)
             
             if not eligible_products:
                 return self._handle_no_matches(user_profile, soft_prefs)
             
-            # Step 2: Soft scoring based on preferences
-            scored_products = self._soft_score(eligible_products, soft_prefs or {})
+            # Step 2: Sort by interest rate (lowest first) - THIS IS THE KEY CHANGE
+            eligible_products.sort(key=lambda x: x.get("interest_rate", float('inf')))
             
-            # Step 3: Apply refinements if provided
-            if refine_params:
-                scored_products = self._apply_refinements(scored_products, refine_params)
+            # Step 3: Take the lowest rate product
+            best_product = eligible_products[0]
             
-            # Step 4: Generate top 3 recommendations
-            top_matches = scored_products[:3]
+            # Step 4: Create detailed product match with all information
+            detailed_match = self._create_detailed_product_match(
+                best_product, user_profile, soft_prefs
+            )
             
             return {
                 "status": "success",
-                "matches": [self._create_product_match(product, user_profile, soft_prefs) 
-                           for product in top_matches],
-                "total_found": len(eligible_products)
+                "matches": [detailed_match],
+                "total_found": len(eligible_products),
+                "recommendation_basis": "lowest_rate"
             }
             
         except Exception as e:
@@ -156,207 +201,214 @@ class ProductMatchingService:
         eligible = []
         
         for product in self.products_parsed:
+            is_eligible = True
+            
             # Check ABN years requirement
             if (product.get("abn_years") and 
                 user_profile.get("ABN_years") and 
                 user_profile["ABN_years"] < product["abn_years"]):
-                continue
+                is_eligible = False
             
             # Check GST years requirement
             if (product.get("gst_years") and 
                 user_profile.get("GST_years") and 
                 user_profile["GST_years"] < product["gst_years"]):
-                continue
+                is_eligible = False
             
             # Check credit score requirement
             if (product.get("credit_score_min") and 
                 user_profile.get("credit_score") and 
                 user_profile["credit_score"] < product["credit_score_min"]):
-                continue
+                is_eligible = False
             
             # Check property requirement
             if product.get("property_required") is not None:
                 user_has_property = user_profile.get("property_status") == "property_owner"
                 if product["property_required"] and not user_has_property:
-                    continue
-                elif not product["property_required"] and user_has_property:
-                    # Property owners can generally use non-property products too
-                    pass
+                    is_eligible = False
             
-            eligible.append(product)
+            if is_eligible:
+                eligible.append(product)
         
         return eligible
     
-    def _soft_score(self, products: List[Dict[str, Any]], 
-                   preferences: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Score products based on soft preferences with equal weighting"""
-        scored_products = []
+    def _create_detailed_product_match(self, product: Dict[str, Any], 
+                                     user_profile: Dict[str, Any],
+                                     preferences: Dict[str, Any] = None) -> ProductMatch:
+        """Create detailed ProductMatch with all required information"""
         
-        # Count active preferences for equal weight distribution
-        active_preferences = [key for key in preferences.keys() if preferences.get(key) is not None]
-        num_active = len(active_preferences)
+        # Calculate comparison rate
+        comparison_rate = self._calculate_comparison_rate(product)
         
-        if num_active == 0:
-            # No preferences provided, sort by interest rate (lower is better)
-            for product in products:
-                score = 1.0
-                if product.get("interest_rate"):
-                    # Higher score for lower interest rates
-                    score += (15 - product["interest_rate"]) / 15 * 0.5
-                product_with_score = product.copy()
-                product_with_score["match_score"] = score
-                scored_products.append(product_with_score)
-        else:
-            # Equal weight for each active preference
-            weight_per_preference = 1.0 / num_active
-            
-            for product in products:
-                score = 1.0  # Base score
-                
-                # Interest rate preference (lower is better)
-                if (preferences.get("interest_rate_ceiling") and 
-                    product.get("interest_rate")):
-                    max_rate = preferences["interest_rate_ceiling"]
-                    actual_rate = product["interest_rate"]
-                    if actual_rate <= max_rate:
-                        # Bonus for being under ceiling
-                        score += (max_rate - actual_rate) / max_rate * weight_per_preference
-                    else:
-                        # Penalty for being over ceiling
-                        score -= (actual_rate - max_rate) / max_rate * weight_per_preference
-                
-                # Monthly budget preference
-                if preferences.get("monthly_budget"):
-                    # This would need loan amount and term to calculate precisely
-                    # For now, favor lower interest rates as they generally mean lower payments
-                    if product.get("interest_rate"):
-                        score += (15 - product["interest_rate"]) / 15 * weight_per_preference
-                
-                # Minimum loan amount preference
-                if preferences.get("min_loan_amount"):
-                    loan_max = product.get("loan_amount", "").lower()
-                    if "unlimited" in loan_max:
-                        score += weight_per_preference
-                    else:
-                        # Try to extract number from loan_amount
-                        amount_match = re.search(r'(\d+)', loan_max.replace(',', ''))
-                        if amount_match:
-                            max_amount = int(amount_match.group(1))
-                            min_needed = preferences["min_loan_amount"]
-                            if max_amount >= min_needed:
-                                score += weight_per_preference * 0.8
-                
-                # Preferred term preference
-                if preferences.get("preferred_term"):
-                    # This would need product term information
-                    # For now, give small bonus
-                    score += weight_per_preference * 0.5
-                
-                # Early repayment preference
-                if preferences.get("early_repay_ok"):
-                    # Most products allow early repayment, small bonus
-                    score += weight_per_preference * 0.3
-                
-                product_with_score = product.copy()
-                product_with_score["match_score"] = score
-                scored_products.append(product_with_score)
+        # Calculate monthly payment if possible
+        monthly_payment = self._calculate_monthly_payment(product, user_profile)
         
-        # Sort by score (highest first)
-        return sorted(scored_products, key=lambda x: x["match_score"], reverse=True)
+        # Create eligibility details
+        eligibility_details = self._create_eligibility_details(product, user_profile)
+        
+        # Generate reasons why this is the best choice
+        reasons = [f"Lowest available rate at {product.get('interest_rate', 0):.2f}%"]
+        
+        if eligibility_details["all_met"]:
+            reasons.append("Meets all requirements")
+        
+        return ProductMatch(
+            product_name=product["name"],
+            lender_name=product.get("lender", "Unknown"),
+            interest_rate=product.get("interest_rate", 0),
+            comparison_rate=comparison_rate,
+            loan_amount_max=product.get("loan_amount", "Contact for details"),
+            loan_term_options=f"Up to {product.get('loan_term', 'Various')} years",
+            match_score=1.0,  # Highest score for lowest rate
+            reasons=reasons,
+            gaps=eligibility_details["gaps"],
+            requirements=product,
+            monthly_payment=monthly_payment,
+            fees_breakdown=product.get("fees", {}),
+            all_requirements_met=eligibility_details["all_met"],
+            eligibility_details=eligibility_details
+        )
     
-    def _apply_refinements(self, products: List[Dict[str, Any]], 
-                          refinements: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Apply additional refinements to product list"""
-        # Apply tolerance for numerical values
-        tolerance = self.fallback_params["tolerance_percentage"] / 100
+    def _calculate_comparison_rate(self, product: Dict[str, Any]) -> float:
+        """Calculate comparison rate including fees"""
+        base_rate = product.get("interest_rate", 0)
+        fees = product.get("fees", {})
         
-        refined = []
-        for product in products:
-            include = True
-            
-            # Apply interest rate refinements with tolerance
-            if refinements.get("max_interest_rate"):
-                max_rate = refinements["max_interest_rate"]
-                actual_rate = product.get("interest_rate", 0)
-                if actual_rate > max_rate * (1 + tolerance):
-                    include = False
-            
-            if include:
-                refined.append(product)
+        # Simplified comparison rate calculation
+        # In reality, this would use proper financial formulas
+        total_fees = sum(fees.values())
+        if total_fees > 0:
+            # Rough estimate: add fee impact to base rate
+            fee_impact = min(total_fees / 10000, 2.0)  # Cap impact at 2%
+            return round(base_rate + fee_impact, 2)
         
-        return refined
+        return base_rate
+    
+    def _calculate_monthly_payment(self, product: Dict[str, Any], 
+                                 user_profile: Dict[str, Any]) -> Optional[float]:
+        """Calculate monthly payment if sufficient information available"""
+        loan_amount = user_profile.get("desired_loan_amount")
+        interest_rate = product.get("interest_rate")
+        term_years = user_profile.get("loan_term_preference") or product.get("loan_term", 5)
+        
+        if not all([loan_amount, interest_rate, term_years]):
+            return None
+        
+        try:
+            # Convert to monthly values
+            monthly_rate = interest_rate / 100 / 12
+            term_months = term_years * 12
+            
+            if monthly_rate == 0:
+                return loan_amount / term_months
+            
+            # Standard loan payment formula
+            payment = (loan_amount * monthly_rate * (1 + monthly_rate) ** term_months) / \
+                     ((1 + monthly_rate) ** term_months - 1)
+            
+            return round(payment, 2)
+        
+        except (ValueError, ZeroDivisionError):
+            return None
+    
+    def _create_eligibility_details(self, product: Dict[str, Any], 
+                                  user_profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Create detailed eligibility analysis"""
+        details = {
+            "requirements": {},
+            "gaps": [],
+            "all_met": True
+        }
+        
+        # Check ABN requirement
+        if product.get("abn_years"):
+            user_abn = user_profile.get("ABN_years", 0)
+            met = user_abn >= product["abn_years"]
+            details["requirements"]["ABN"] = {
+                "required": f"≥{product['abn_years']} years",
+                "user_has": f"{user_abn} years",
+                "met": met
+            }
+            if not met:
+                details["gaps"].append(f"Need {product['abn_years']} years ABN (you have {user_abn})")
+                details["all_met"] = False
+        
+        # Check GST requirement
+        if product.get("gst_years"):
+            user_gst = user_profile.get("GST_years", 0)
+            met = user_gst >= product["gst_years"]
+            details["requirements"]["GST"] = {
+                "required": f"≥{product['gst_years']} years",
+                "user_has": f"{user_gst} years",
+                "met": met
+            }
+            if not met:
+                details["gaps"].append(f"Need {product['gst_years']} years GST (you have {user_gst})")
+                details["all_met"] = False
+        
+        # Check credit score requirement
+        if product.get("credit_score_min"):
+            user_score = user_profile.get("credit_score", 0)
+            met = user_score >= product["credit_score_min"]
+            details["requirements"]["Credit Score"] = {
+                "required": f"≥{product['credit_score_min']}",
+                "user_has": str(user_score),
+                "met": met
+            }
+            if not met:
+                details["gaps"].append(f"Need credit score {product['credit_score_min']} (you have {user_score})")
+                details["all_met"] = False
+        
+        # Check property requirement
+        if product.get("property_required") is not None:
+            user_has_property = user_profile.get("property_status") == "property_owner"
+            met = product["property_required"] == user_has_property
+            details["requirements"]["Property"] = {
+                "required": "Required" if product["property_required"] else "Not Required",
+                "user_has": "Property Owner" if user_has_property else "Non-Property Owner",
+                "met": met
+            }
+            if not met and product["property_required"]:
+                details["gaps"].append("Property ownership required")
+                details["all_met"] = False
+        
+        return details
     
     def _handle_no_matches(self, user_profile: Dict[str, Any], 
                           soft_prefs: Dict[str, Any]) -> Dict[str, Any]:
         """Handle case when no products match"""
-        # Try with relaxed criteria
-        relaxed_products = []
+        # Find closest matches for gap analysis
+        closest_products = []
         
         for product in self.products_parsed:
             gaps = []
             
-            # Check what requirements are not met
+            # Analyze gaps
             if (product.get("abn_years") and 
                 user_profile.get("ABN_years") and 
                 user_profile["ABN_years"] < product["abn_years"]):
-                gaps.append(f"ABN registration needs {product['abn_years']} years (you have {user_profile['ABN_years']})")
+                gaps.append(f"Need {product['abn_years']} years ABN")
             
             if (product.get("credit_score_min") and 
                 user_profile.get("credit_score") and 
                 user_profile["credit_score"] < product["credit_score_min"]):
-                gaps.append(f"Credit score needs to be {product['credit_score_min']} (you have {user_profile['credit_score']})")
+                gaps.append(f"Need credit score {product['credit_score_min']}")
             
             if product.get("property_required") and user_profile.get("property_status") != "property_owner":
                 gaps.append("Property ownership required")
             
-            if len(gaps) <= 2:  # Only show products with 2 or fewer gaps
-                product_match = self._create_product_match(product, user_profile, soft_prefs)
+            if len(gaps) <= 2:  # Show products with 2 or fewer gaps
+                product_match = self._create_detailed_product_match(product, user_profile, soft_prefs)
                 product_match.gaps = gaps
-                relaxed_products.append(product_match)
+                product_match.all_requirements_met = False
+                closest_products.append(product_match)
         
-        # Sort by number of gaps (fewer gaps first)
-        relaxed_products.sort(key=lambda x: len(x.gaps))
+        # Sort by lowest rate among closest matches
+        closest_products.sort(key=lambda x: x.interest_rate)
         
         return {
             "status": "no_perfect_match",
-            "message": "No products meet all your requirements, but here are the closest options:",
-            "matches": relaxed_products[:3]
+            "message": "No products meet all requirements, showing closest option:",
+            "matches": closest_products[:1],  # Show only the lowest rate option
+            "recommendation_basis": "lowest_rate_with_gaps"
         }
-    
-    def _create_product_match(self, product: Dict[str, Any], 
-                             user_profile: Dict[str, Any],
-                             preferences: Dict[str, Any] = None) -> ProductMatch:
-        """Create a ProductMatch object from product data"""
-        reasons = []
-        
-        # Generate reasons based on why this product is good
-        if product.get("interest_rate"):
-            if preferences and preferences.get("interest_rate_ceiling"):
-                ceiling = preferences["interest_rate_ceiling"]
-                if product["interest_rate"] <= ceiling:
-                    diff = ceiling - product["interest_rate"]
-                    reasons.append(f"Interest rate {diff:.2f}pp below your maximum")
-            else:
-                reasons.append(f"Competitive interest rate of {product['interest_rate']}%")
-        
-        if product.get("loan_amount") == "Unlimited":
-            reasons.append("No maximum loan amount limit")
-        
-        if not product.get("property_required") and user_profile.get("property_status") != "property_owner":
-            reasons.append("No property ownership required")
-        
-        if len(reasons) == 0:
-            reasons.append("Meets your basic requirements")
-        
-        # Ensure we have at most 3 reasons
-        reasons = reasons[:3]
-        
-        return ProductMatch(
-            product_name=product["name"],
-            interest_rate=product.get("interest_rate", 0),
-            loan_amount_max=product.get("loan_amount", "Contact for details"),
-            match_score=product.get("match_score", 0.5),
-            reasons=reasons,
-            gaps=[],
-            requirements=product
-        )

@@ -1,26 +1,83 @@
+# main.py - Updated for Claude 4 Integration with Enhanced Services
 import os
 import requests
+import asyncio
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import router as api_router
-from app.services.enhanced_prompt_service import EnhancedPromptService, ConversationStage
-from app.services.conversation_flow_service import ConversationFlowService, ConversationState
-from app.services.mvp_preference_extractor import MVPPreferenceExtractor
-from app.services.product_matching_service import ProductMatchingService
+
+# Enhanced Memory Service (Primary)
+try:
+    from app.services.enhanced_memory_conversation_service import EnhancedMemoryService, ConversationStage
+    ENHANCED_MEMORY_AVAILABLE = True
+    print("✅ Enhanced memory service loaded")
+except ImportError as e:
+    print(f"⚠️ Enhanced memory service not available: {e}")
+    ENHANCED_MEMORY_AVAILABLE = False
+
+# AI Service for Claude 4
+try:
+    from app.services.ai_service import UnifiedAIService, AIProvider
+    AI_SERVICE_AVAILABLE = True
+    print("✅ Unified AI service loaded")
+except ImportError as e:
+    print(f"⚠️ AI service not available: {e}")
+    AI_SERVICE_AVAILABLE = False
+
+# Enhanced Services
+try:
+    from app.services.enhanced_prompt_service import EnhancedPromptService
+    ENHANCED_PROMPT_AVAILABLE = True
+    print("✅ Enhanced prompt service loaded")
+except ImportError as e:
+    print(f"⚠️ Enhanced prompt service not available: {e}")
+    ENHANCED_PROMPT_AVAILABLE = False
+
+try:
+    from app.services.conversation_flow_service import EnhancedConversationFlowService
+    CONVERSATION_FLOW_AVAILABLE = True
+    print("✅ Enhanced conversation flow service loaded")
+except ImportError as e:
+    print(f"⚠️ Conversation flow service not available: {e}")
+    CONVERSATION_FLOW_AVAILABLE = False
+
+try:
+    from app.services.mvp_preference_extractor import MVPPreferenceExtractor
+    MVP_EXTRACTOR_AVAILABLE = True
+    print("✅ MVP preference extractor loaded")
+except ImportError as e:
+    print(f"⚠️ MVP preference extractor not available: {e}")
+    MVP_EXTRACTOR_AVAILABLE = False
+
+try:
+    from app.services.product_matching_service import ProductMatchingService
+    PRODUCT_MATCHING_AVAILABLE = True
+    print("✅ Product matching service loaded")
+except ImportError as e:
+    print(f"⚠️ Product matching service not available: {e}")
+    PRODUCT_MATCHING_AVAILABLE = False
+
+try:
+    from app.services.enhanced_customer_extractor import EnhancedCustomerInfoExtractor
+    CUSTOMER_EXTRACTOR_AVAILABLE = True
+    print("✅ Enhanced customer extractor loaded")
+except ImportError as e:
+    print(f"⚠️ Enhanced customer extractor not available: {e}")
+    CUSTOMER_EXTRACTOR_AVAILABLE = False
 
 # Load environment variables
 load_dotenv(dotenv_path="API.env")
 
-# OpenRouter API configuration
+# Fallback OpenRouter API configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Create FastAPI application
 app = FastAPI(
-    title="Car Loan AI Agent",
-    description="AI agent backend for car loan company with structured conversation flow",
-    version="0.2"
+    title="Car Loan AI Agent - Claude 4 Enhanced",
+    description="AI agent backend with Claude 4, enhanced memory, and multi-lender support",
+    version="3.0-claude4-enhanced"
 )
 
 # CORS configuration
@@ -28,6 +85,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "http://localhost:3000",
         "https://cmap-frontend.onrender.com",
         "https://*.onrender.com"
     ],
@@ -37,19 +95,29 @@ app.add_middleware(
 )
 
 # Initialize services
-prompt_service = EnhancedPromptService()
-flow_service = ConversationFlowService()
-mvp_extractor = MVPPreferenceExtractor()
-product_matcher = ProductMatchingService()
+enhanced_memory_service = EnhancedMemoryService() if ENHANCED_MEMORY_AVAILABLE else None
+ai_service = UnifiedAIService() if AI_SERVICE_AVAILABLE else None
+enhanced_prompt_service = EnhancedPromptService() if ENHANCED_PROMPT_AVAILABLE else None
+conversation_flow_service = EnhancedConversationFlowService() if CONVERSATION_FLOW_AVAILABLE else None
+mvp_extractor = MVPPreferenceExtractor() if MVP_EXTRACTOR_AVAILABLE else None
+product_matcher = ProductMatchingService() if PRODUCT_MATCHING_AVAILABLE else None
+customer_extractor = EnhancedCustomerInfoExtractor() if CUSTOMER_EXTRACTOR_AVAILABLE else None
 
-# Store conversation states (in production, use Redis or database)
-conversation_states = {}
+# Configure AI service for Claude 4
+if AI_SERVICE_AVAILABLE and ai_service:
+    # Try to use Claude 4 through OpenRouter, fallback to Gemini
+    try:
+        ai_service.switch_provider(AIProvider.OPENROUTER, "claude")
+        print("✅ Configured for Claude 4 via OpenRouter")
+    except:
+        ai_service.switch_provider(AIProvider.OPENROUTER, "gemini_flash")
+        print("⚠️ Fallback to Gemini Flash")
 
 app.include_router(api_router)
 
 @app.post("/chat")
 async def chat(request: Request):
-    """Main chat endpoint with structured conversation flow"""
+    """Enhanced chat endpoint with Claude 4, memory, and multi-lender support"""
     try:
         data = await request.json()
         user_input = data.get("message")
@@ -59,143 +127,289 @@ async def chat(request: Request):
         if not user_input:
             raise HTTPException(status_code=400, detail="Message content cannot be empty")
 
-        # Get or initialize conversation state
-        if session_id not in conversation_states:
-            conversation_states[session_id] = flow_service.init_conversation_state()
+        # Enhanced memory context building
+        memory_context = ""
+        extracted_info = {}
+        conversation_state = None
         
-        current_state = conversation_states[session_id]
+        if ENHANCED_MEMORY_AVAILABLE and enhanced_memory_service:
+            # Create memory-aware context
+            memory_context = enhanced_memory_service.create_context_aware_prompt(session_id, user_input)
+            
+            # Get session memory
+            memory = enhanced_memory_service.get_or_create_session(session_id)
+            
+            # Extract customer information from conversation history
+            if CUSTOMER_EXTRACTOR_AVAILABLE and customer_extractor:
+                conversation_for_extraction = chat_history + [{"role": "user", "content": user_input}]
+                customer_info = await customer_extractor.extract_from_conversation(conversation_for_extraction)
+                
+                # Update memory with extracted info
+                for field in customer_info.extracted_fields:
+                    value = getattr(customer_info.personal_info, field, None) or \
+                           getattr(customer_info.business_info, field, None) or \
+                           getattr(customer_info.asset_info, field, None) or \
+                           getattr(customer_info.financial_info, field, None)
+                    if value is not None:
+                        memory.customer_info.update_field(field, value)
+            
+            # Get collected information from memory
+            collected_fields = {}
+            for field in memory.customer_info.confirmed_fields:
+                value = getattr(memory.customer_info, field, None)
+                if value is not None:
+                    collected_fields[field] = value
+            
+            extracted_info = {"mvp_fields": collected_fields, "preferences": {}}
         
-        # Extract MVP and preferences from conversation
-        conversation_for_extraction = chat_history + [{"role": "user", "content": user_input}]
-        extracted_data = await mvp_extractor.extract_mvp_and_preferences(conversation_for_extraction)
-        
-        # Update conversation state
-        update_data = {}
-        update_data.update(extracted_data.get("mvp_fields", {}))
-        update_data.update(extracted_data.get("preferences", {}))
-        
-        updated_state = flow_service.update_conversation_state(current_state, update_data)
-        
-        # Handle stage-specific logic
-        if updated_state.stage == ConversationStage.PRODUCT_MATCHING:
-            matching_result = await _handle_product_matching(updated_state)
-            if matching_result.get("status") == "no_perfect_match":
-                updated_state.gaps = _extract_gaps_from_matches(matching_result.get("matches", []))
-                updated_state.stage = ConversationStage.GAP_ANALYSIS
+        # Conversation flow management
+        if CONVERSATION_FLOW_AVAILABLE and conversation_flow_service:
+            if session_id not in conversation_states:
+                conversation_state = conversation_flow_service.init_conversation_state()
             else:
-                updated_state.matched_products = matching_result.get("matches", [])
+                conversation_state = conversation_states[session_id]
+            
+            # Update conversation state with extracted info
+            conversation_state = conversation_flow_service.update_conversation_state(
+                conversation_state, extracted_info
+            )
+            
+            conversation_states[session_id] = conversation_state
         
-        # Prepare context for prompt generation
-        context = flow_service.get_conversation_context(updated_state)
+        # Build AI messages with enhanced prompts
+        messages = []
         
-        # Create stage-specific messages
-        messages = prompt_service.create_chat_messages(
-            user_input, 
-            updated_state.stage, 
-            context, 
-            chat_history
-        )
+        # System prompt with memory and conversation context
+        if ENHANCED_PROMPT_AVAILABLE and enhanced_prompt_service and conversation_state:
+            context = conversation_flow_service.get_conversation_context(conversation_state)
+            system_prompt = enhanced_prompt_service.create_system_prompt(
+                conversation_state.stage, context
+            )
+        else:
+            system_prompt = f"""You are a professional loan advisor AI assistant with enhanced capabilities.
+
+## CORE PRINCIPLES:
+1. NEVER repeat questions about information the customer has already provided
+2. DO NOT repeat questions that were asked in recent conversation rounds
+3. Use existing information intelligently to advance the conversation
+4. Only ask for genuinely missing critical information
+
+## CURRENT MEMORY CONTEXT:
+{memory_context if memory_context else "No memory context available"}
+
+## YOUR TASK:
+- Respond intelligently based on the memory context above
+- Only ask for truly missing important information
+- Avoid ANY form of repetitive questioning
+- When sufficient information is available, recommend suitable loan products from ALL FOUR LENDERS: Angle, BFS, FCAU, and RAF
+- Always specify lender name clearly in recommendations: [Lender Name] - [Product Name]
+
+Please respond based on the above context and memory information."""
+
+        messages.append({"role": "system", "content": system_prompt})
         
-        # Add stage-specific system instructions
-        messages = _add_stage_instructions(messages, updated_state)
+        # Add conversation history (limit to avoid token overflow)
+        recent_history = chat_history[-8:] if len(chat_history) > 8 else chat_history
+        for chat in recent_history:
+            if "user" in chat and "assistant" in chat:
+                messages.append({"role": "user", "content": chat["user"]})
+                messages.append({"role": "assistant", "content": chat["assistant"]})
         
-        # Call OpenRouter API
-        response = await _call_openrouter_api(messages)
+        # Add current user message
+        messages.append({"role": "user", "content": user_input})
+        
+        # Call AI service (Claude 4 or fallback)
+        response = None
+        if AI_SERVICE_AVAILABLE and ai_service:
+            response = await ai_service.call_ai(messages, temperature=0.7, max_tokens=1200)
+        
+        # Fallback to OpenRouter direct call
+        if not response:
+            response = await _call_openrouter_api(messages)
         
         if not response:
             return _create_error_response("Failed to get AI response")
         
-        # Update conversation state
-        updated_state.conversation_round += 1
-        conversation_states[session_id] = updated_state
+        # Update memory and conversation state
+        conversation_summary = {}
+        if ENHANCED_MEMORY_AVAILABLE and enhanced_memory_service:
+            memory = enhanced_memory_service.get_or_create_session(session_id)
+            memory.add_message("assistant", response)
+            conversation_summary = enhanced_memory_service.get_conversation_summary(session_id)
+        
+        # Product matching if sufficient information
+        matched_products_count = 0
+        product_matches = []
+        if PRODUCT_MATCHING_AVAILABLE and extracted_info.get("mvp_fields"):
+            mvp_fields = extracted_info["mvp_fields"]
+            if len(mvp_fields) >= 3:  # When enough information is available
+                try:
+                    matching_result = product_matcher.find_best_loan_product(
+                        user_profile=mvp_fields,
+                        soft_prefs=extracted_info.get("preferences", {})
+                    )
+                    matched_products_count = len(matching_result.get("matches", []))
+                    product_matches = matching_result.get("matches", [])
+                except Exception as e:
+                    print(f"Product matching error: {e}")
         
         return {
             "reply": response,
-            "conversation_stage": updated_state.stage.value,
-            "mvp_progress": {
-                "completed_fields": list(updated_state.mvp_fields.keys()),
-                "missing_fields": updated_state.missing_mvp_fields,
-                "is_complete": len(updated_state.missing_mvp_fields) == 0
-            },
-            "preferences_collected": updated_state.preferences,
-            "matched_products_count": len(updated_state.matched_products),
-            "conversation_round": updated_state.conversation_round,
-            "status": "success"
+            "session_id": session_id,
+            "memory_summary": conversation_summary,
+            "extracted_info": extracted_info,
+            "matched_products_count": matched_products_count,
+            "conversation_stage": conversation_state.stage.value if conversation_state else "unknown",
+            "ai_provider": ai_service.get_current_config() if AI_SERVICE_AVAILABLE else "fallback",
+            "status": "success",
+            "features": {
+                "claude_4_support": AI_SERVICE_AVAILABLE,
+                "enhanced_memory": ENHANCED_MEMORY_AVAILABLE,
+                "anti_repetition": ENHANCED_MEMORY_AVAILABLE,
+                "context_aware": ENHANCED_MEMORY_AVAILABLE,
+                "conversation_flow": CONVERSATION_FLOW_AVAILABLE,
+                "mvp_extraction": MVP_EXTRACTOR_AVAILABLE,
+                "customer_extraction": CUSTOMER_EXTRACTOR_AVAILABLE,
+                "product_matching": PRODUCT_MATCHING_AVAILABLE,
+                "multi_lender_support": True
+            }
         }
         
     except Exception as e:
         print(f"Chat error: {e}")
         return _create_error_response(f"Technical issue: {str(e)}")
 
-@app.post("/get-conversation-state")
-async def get_conversation_state(request: Request):
-    """Get current conversation state for debugging"""
+@app.post("/switch-ai-provider")
+async def switch_ai_provider(request: Request):
+    """Switch AI provider and model"""
     try:
         data = await request.json()
-        session_id = data.get("session_id", "default")
+        provider = data.get("provider", "openrouter")
+        model = data.get("model", "gemini_flash")
         
-        if session_id in conversation_states:
-            state = conversation_states[session_id]
+        if not AI_SERVICE_AVAILABLE or not ai_service:
             return {
-                "session_id": session_id,
-                "stage": state.stage.value,
-                "mvp_fields": state.mvp_fields,
-                "missing_mvp_fields": state.missing_mvp_fields,
-                "preferences": state.preferences,
-                "conversation_round": state.conversation_round,
-                "gaps": state.gaps,
-                "matched_products_count": len(state.matched_products)
+                "status": "not_available",
+                "message": "AI service not loaded"
             }
-        else:
+        
+        try:
+            if provider == "openrouter":
+                ai_service.switch_provider(AIProvider.OPENROUTER, model)
+            elif provider == "google_studio":
+                ai_service.switch_provider(AIProvider.GOOGLE_STUDIO, model)
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Unsupported provider: {provider}"
+                }
+            
             return {
-                "session_id": session_id,
-                "stage": "not_started",
-                "message": "No conversation state found"
+                "status": "success",
+                "current_config": ai_service.get_current_config(),
+                "message": f"Switched to {provider} - {model}"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": str(e)
             }
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/reset-conversation")
-async def reset_conversation(request: Request):
-    """Reset conversation state for a session"""
+@app.post("/get-memory-status")
+async def get_memory_status(request: Request):
+    """Get comprehensive memory system status"""
     try:
         data = await request.json()
         session_id = data.get("session_id", "default")
         
-        conversation_states[session_id] = flow_service.init_conversation_state()
+        if not ENHANCED_MEMORY_AVAILABLE or not enhanced_memory_service:
+            return {
+                "status": "memory_not_available",
+                "message": "Enhanced memory service not loaded"
+            }
+        
+        summary = enhanced_memory_service.get_conversation_summary(session_id)
+        memory = enhanced_memory_service.get_or_create_session(session_id)
         
         return {
-            "status": "success",
-            "message": f"Conversation state reset for session {session_id}",
-            "new_stage": "greeting"
+            "status": "memory_available",
+            "session_summary": summary,
+            "anti_repetition_status": {
+                "asked_fields": list(memory.customer_info.asked_fields),
+                "confirmed_fields": list(memory.customer_info.confirmed_fields),
+                "recent_questions": memory.last_questions[-5:],
+                "conversation_rounds": memory.conversation_round
+            },
+            "next_recommended_questions": enhanced_memory_service.get_next_questions(session_id, max_questions=3),
+            "customer_profile": {
+                field: getattr(memory.customer_info, field) 
+                for field in memory.customer_info.confirmed_fields
+            }
         }
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/force-stage-transition")
-async def force_stage_transition(request: Request):
-    """Force transition to a specific stage (for testing)"""
+@app.post("/extract-customer-info")
+async def extract_customer_info(request: Request):
+    """Extract comprehensive customer information"""
     try:
         data = await request.json()
-        session_id = data.get("session_id", "default")
-        target_stage = data.get("target_stage")
+        conversation_history = data.get("conversation_history", [])
         
-        if session_id not in conversation_states:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        try:
-            new_stage = ConversationStage(target_stage)
-            conversation_states[session_id].stage = new_stage
-            
+        if not CUSTOMER_EXTRACTOR_AVAILABLE or not customer_extractor:
             return {
-                "status": "success",
-                "message": f"Stage changed to {target_stage}",
-                "current_stage": new_stage.value
+                "status": "not_available",
+                "message": "Customer extractor not loaded"
             }
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid stage: {target_stage}")
+        
+        customer_info = await customer_extractor.extract_from_conversation(conversation_history)
+        
+        return {
+            "status": "success",
+            "customer_info": {
+                "loan_type": customer_info.loan_type,
+                "personal_info": customer_info.personal_info.dict(),
+                "business_info": customer_info.business_info.dict(),
+                "asset_info": customer_info.asset_info.dict(),
+                "financial_info": customer_info.financial_info.dict(),
+                "extracted_fields": customer_info.extracted_fields,
+                "confidence_score": customer_info.confidence_score
+            },
+            "missing_fields": customer_extractor.get_missing_fields(customer_info),
+            "follow_up_questions": customer_extractor.generate_follow_up_questions(customer_info)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/find-products-multi-lender")
+async def find_products_multi_lender(request: Request):
+    """Find products across all lenders"""
+    try:
+        data = await request.json()
+        user_profile = data.get("user_profile", {})
+        preferences = data.get("preferences", {})
+        
+        if not PRODUCT_MATCHING_AVAILABLE or not product_matcher:
+            return {
+                "status": "not_available",
+                "message": "Product matching service not loaded"
+            }
+        
+        result = product_matcher.find_best_loan_product(
+            user_profile=user_profile,
+            soft_prefs=preferences
+        )
+        
+        return {
+            **result,
+            "lenders_checked": ["Angle", "BFS", "FCAU", "RAF"],
+            "service_type": "multi_lender"
+        }
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -204,21 +418,104 @@ async def force_stage_transition(request: Request):
 async def health_check():
     return {
         "status": "healthy",
-        "message": "Car Loan AI Agent is running with structured flow",
-        "services": {
-            "prompt_service": "loaded",
-            "flow_service": "loaded", 
-            "mvp_extractor": "loaded",
-            "product_matcher": "loaded"
+        "message": "Car Loan AI Agent - Claude 4 Enhanced",
+        "version": "3.0-claude4-enhanced",
+        "ai_provider": ai_service.get_current_config() if AI_SERVICE_AVAILABLE else "fallback",
+        "features": {
+            "claude_4_support": AI_SERVICE_AVAILABLE,
+            "enhanced_memory": ENHANCED_MEMORY_AVAILABLE,
+            "anti_repetition": ENHANCED_MEMORY_AVAILABLE,
+            "context_awareness": ENHANCED_MEMORY_AVAILABLE,
+            "enhanced_prompt": ENHANCED_PROMPT_AVAILABLE,
+            "conversation_flow": CONVERSATION_FLOW_AVAILABLE,
+            "mvp_extraction": MVP_EXTRACTOR_AVAILABLE,
+            "customer_extraction": CUSTOMER_EXTRACTOR_AVAILABLE,
+            "product_matching": PRODUCT_MATCHING_AVAILABLE,
+            "multi_lender_support": True
         },
-        "conversation_stages": [stage.value for stage in ConversationStage]
+        "lenders_supported": ["Angle", "BFS", "FCAU", "RAF"],
+        "ai_capabilities": {
+            "providers_available": ["OpenRouter", "Google Studio"] if AI_SERVICE_AVAILABLE else ["OpenRouter Fallback"],
+            "models_available": ["Claude 4", "Gemini Flash", "GPT-4"] if AI_SERVICE_AVAILABLE else ["Gemini Flash"]
+        }
     }
+
+@app.get("/system-status")
+async def system_status():
+    """Comprehensive system status"""
+    return {
+        "timestamp": "2025-08-03",
+        "version": "3.0-claude4-enhanced",
+        "services": {
+            "ai_service": {
+                "available": AI_SERVICE_AVAILABLE,
+                "current_provider": ai_service.get_current_config() if AI_SERVICE_AVAILABLE else None,
+                "status": "loaded" if AI_SERVICE_AVAILABLE else "not_found"
+            },
+            "enhanced_memory_service": {
+                "available": ENHANCED_MEMORY_AVAILABLE,
+                "status": "loaded" if ENHANCED_MEMORY_AVAILABLE else "not_found",
+                "active_sessions": len(enhanced_memory_service.sessions) if ENHANCED_MEMORY_AVAILABLE else 0
+            },
+            "enhanced_prompt_service": {
+                "available": ENHANCED_PROMPT_AVAILABLE,
+                "status": "loaded" if ENHANCED_PROMPT_AVAILABLE else "not_found"
+            },
+            "conversation_flow_service": {
+                "available": CONVERSATION_FLOW_AVAILABLE,
+                "status": "loaded" if CONVERSATION_FLOW_AVAILABLE else "not_found"
+            },
+            "mvp_preference_extractor": {
+                "available": MVP_EXTRACTOR_AVAILABLE,
+                "status": "loaded" if MVP_EXTRACTOR_AVAILABLE else "not_found"
+            },
+            "customer_extractor": {
+                "available": CUSTOMER_EXTRACTOR_AVAILABLE,
+                "status": "loaded" if CUSTOMER_EXTRACTOR_AVAILABLE else "not_found"
+            },
+            "product_matching_service": {
+                "available": PRODUCT_MATCHING_AVAILABLE,
+                "status": "loaded" if PRODUCT_MATCHING_AVAILABLE else "not_found"
+            }
+        },
+        "functionality": {
+            "claude_4_ai": AI_SERVICE_AVAILABLE,
+            "enhanced_memory": ENHANCED_MEMORY_AVAILABLE,
+            "anti_repetition": ENHANCED_MEMORY_AVAILABLE,
+            "conversation_management": CONVERSATION_FLOW_AVAILABLE,
+            "customer_extraction": CUSTOMER_EXTRACTOR_AVAILABLE,
+            "product_matching": PRODUCT_MATCHING_AVAILABLE,
+            "multi_lender_support": True
+        },
+        "recommendations": {
+            "production_ready": all([
+                AI_SERVICE_AVAILABLE,
+                ENHANCED_MEMORY_AVAILABLE,
+                CONVERSATION_FLOW_AVAILABLE,
+                PRODUCT_MATCHING_AVAILABLE
+            ]),
+            "missing_services": [
+                service for service, available in [
+                    ("ai_service", AI_SERVICE_AVAILABLE),
+                    ("enhanced_memory", ENHANCED_MEMORY_AVAILABLE),
+                    ("conversation_flow", CONVERSATION_FLOW_AVAILABLE),
+                    ("product_matching", PRODUCT_MATCHING_AVAILABLE)
+                ] if not available
+            ]
+        }
+    }
+
+# Store conversation states
+conversation_states = {}
 
 # Helper functions
 
 async def _call_openrouter_api(messages: list) -> str:
-    """Call OpenRouter API and return response"""
+    """Fallback OpenRouter API call"""
     try:
+        if not OPENROUTER_API_KEY:
+            return "API key not configured. Please check your environment settings."
+        
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "Content-Type": "application/json"
@@ -228,99 +525,21 @@ async def _call_openrouter_api(messages: list) -> str:
             "model": "google/gemini-2.0-flash-exp:free",
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1000
+            "max_tokens": 1200
         }
 
         response = requests.post(OPENROUTER_API_URL, headers=headers, json=payload)
 
         if response.status_code != 200:
             print(f"OpenRouter API error: {response.status_code} - {response.text}")
-            return None
+            return "I'm experiencing connectivity issues. Please try again later."
 
         result = response.json()
         return result['choices'][0]['message']['content']
         
     except Exception as e:
         print(f"OpenRouter API call failed: {e}")
-        return None
-
-def _add_stage_instructions(messages: list, state: ConversationState) -> list:
-    """Add stage-specific instructions to messages"""
-    
-    if state.stage == ConversationStage.MVP_COLLECTION:
-        next_fields = flow_service.get_next_mvp_fields_to_ask(state, max_fields=2)
-        if next_fields:
-            questions = flow_service.generate_mvp_questions(next_fields)
-            instruction = f"\n\n[SYSTEM INSTRUCTION: Ask about these specific MVP fields: {list(questions.keys())}. Use these questions: {list(questions.values())}. Do NOT ask about preferences yet.]"
-            messages[-1]["content"] += instruction
-    
-    elif state.stage == ConversationStage.PREFERENCE_COLLECTION:
-        if not state.preferences:
-            instruction = f"\n\n[SYSTEM INSTRUCTION: MVP collection is complete. Now ask the customer to choose 1-2 preferences from the 4 options in your system prompt. Present the preference collection prompt clearly.]"
-            messages[-1]["content"] += instruction
-    
-    elif state.stage == ConversationStage.PRODUCT_MATCHING:
-        if state.matched_products:
-            products_summary = _format_products_for_prompt(state.matched_products)
-            instruction = f"\n\n[SYSTEM INSTRUCTION: Present these matched products: {products_summary}. Explain why each matches their needs.]"
-            messages[-1]["content"] += instruction
-    
-    elif state.stage == ConversationStage.GAP_ANALYSIS:
-        if state.gaps:
-            instruction = f"\n\n[SYSTEM INSTRUCTION: Address these gaps: {state.gaps}. Offer solutions or alternatives.]"
-            messages[-1]["content"] += instruction
-    
-    return messages
-
-async def _handle_product_matching(state: ConversationState) -> dict:
-    """Handle product matching logic"""
-    try:
-        # Convert state to format expected by product matcher
-        user_profile = {
-            "ABN_years": state.mvp_fields.get("ABN_years", 0),
-            "GST_years": state.mvp_fields.get("GST_years", 0),
-            "property_status": state.mvp_fields.get("property_status", "unknown"),
-            "credit_score": 600,  # Default assumption
-            "loan_type": state.mvp_fields.get("loan_type", "consumer")
-        }
-        
-        # Call product matching service
-        matching_result = product_matcher.find_best_loan_product(
-            user_profile=user_profile,
-            soft_prefs=state.preferences
-        )
-        
-        return matching_result
-        
-    except Exception as e:
-        print(f"Product matching error: {e}")
-        return {
-            "status": "error",
-            "message": "Unable to match products at this time",
-            "matches": []
-        }
-
-def _extract_gaps_from_matches(matches: list) -> list:
-    """Extract gaps from product matches"""
-    gaps = []
-    for match in matches:
-        if hasattr(match, 'gaps') and match.gaps:
-            gaps.extend(match.gaps)
-    return list(set(gaps))  # Remove duplicates
-
-def _format_products_for_prompt(products: list) -> str:
-    """Format matched products for inclusion in prompt"""
-    if not products:
-        return "No suitable products found."
-    
-    formatted = []
-    for i, product in enumerate(products[:3], 1):
-        if hasattr(product, 'product_name'):
-            formatted.append(f"{i}. {product.product_name} - {product.interest_rate}% interest rate")
-        else:
-            formatted.append(f"{i}. {product.get('name', 'Unknown Product')}")
-    
-    return "; ".join(formatted)
+        return "I'm having technical difficulties. Please try again."
 
 def _create_error_response(error_message: str) -> dict:
     """Create standardized error response"""
@@ -328,8 +547,14 @@ def _create_error_response(error_message: str) -> dict:
         "reply": "I apologize, but I'm experiencing a technical issue. Please try again or contact our support team if the problem persists.",
         "status": "error",
         "error_detail": error_message,
-        "conversation_stage": "error",
-        "mvp_progress": {"completed_fields": [], "missing_fields": [], "is_complete": False},
-        "preferences_collected": {},
-        "matched_products_count": 0
+        "features": {
+            "claude_4_support": AI_SERVICE_AVAILABLE,
+            "enhanced_memory": False,
+            "anti_repetition": False,
+            "context_awareness": False
+        }
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

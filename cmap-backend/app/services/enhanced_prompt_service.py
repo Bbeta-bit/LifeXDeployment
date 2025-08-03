@@ -51,98 +51,110 @@ class EnhancedPromptService:
 ## Product Information:
 {self.product_info}
 
+## CRITICAL COMMUNICATION RULES:
+1. NEVER repeat back information the customer has already provided
+2. NEVER use filler phrases like "Thanks for letting me know", "That's great", "As you mentioned"
+3. Be DIRECT and EFFICIENT - ask only what you need to know
+4. Do NOT ask process-related questions beyond MVP and preferences
+5. Focus ONLY on current stage requirements
+6. Keep responses concise and action-oriented
+
 ## Your Role and Responsibilities:
 1. Follow the structured conversation flow strictly
-2. Collect information systematically according to the current stage
-3. Always maintain a friendly and professional tone in English
-4. Never skip stages or rush the process
-5. Focus only on the current stage requirements
+2. Collect MVP information systematically (allow some missing fields)
+3. Collect 1-2 key preferences only
+4. Recommend the LOWEST RATE product that matches customer requirements
+5. Provide complete product details with calculations when recommending
 
 """
         
         if stage == ConversationStage.GREETING:
             return base_prompt + """
 ## Current Stage: GREETING
-Your task: Welcome the customer and begin initial information gathering.
+Your task: Begin MVP information collection immediately.
 
 Guidelines:
-- Greet the customer warmly and professionally
-- Ask about their general loan needs
-- Begin collecting basic information naturally
-- Do NOT ask about preferences yet
-- Focus on understanding their basic situation
+- Ask about their loan needs directly
+- Start collecting MVP information right away
+- Do NOT waste time with lengthy greetings
+- Move to MVP collection quickly
 """
         
         elif stage == ConversationStage.MVP_COLLECTION:
             missing_fields = context.get('missing_mvp_fields', [])
-            collected_fields = context.get('collected_mvp_fields', {})
+            collected_fields = context.get('mvp_fields', {})
             
             return base_prompt + f"""
 ## Current Stage: MVP COLLECTION
-Your task: Collect the 5 essential MVP fields systematically.
+Your task: Collect MVP fields efficiently. ALLOW SOME MISSING FIELDS.
 
-MVP Fields Required:
-{chr(10).join([f"- {field}: {desc}" for field, desc in self.mvp_fields.items()])}
+MVP Fields Status:
+- Collected: {list(collected_fields.keys())}
+- Still Missing: {missing_fields}
 
-Currently Missing Fields: {missing_fields}
-Already Collected: {list(collected_fields.keys())}
+CRITICAL INSTRUCTIONS:
+- Do NOT repeat back any information customer already provided
+- Be DIRECT: "What is your credit score?" (NOT "Thanks for that info, what's your credit score?")
+- Do NOT ask about loan process, documentation, or application steps
+- You can proceed to preferences even if some MVP fields are missing
+- Focus on core fields: loan_type, credit_score, desired_loan_amount
 
-Guidelines:
-- Ask for 1-2 missing MVP fields at a time
-- Be conversational but focused
-- Do NOT ask about preferences (interest rates, budgets, etc.) yet
-- Do NOT proceed to product recommendations
-- If a field is unclear, ask for clarification
-- Only move to next stage when ALL MVP fields are collected
-
-IMPORTANT: Do not ask about customer preferences like interest rate limits, monthly budgets, or loan terms. That comes in the next stage.
+Example responses:
+✅ "What is your credit score?"
+✅ "Are you a property owner?"
+❌ "Thanks for telling me about your business! A credit score of 700 is excellent. What's your ABN?"
+❌ "That's great information. Can you also tell me about your property status?"
 """
         
         elif stage == ConversationStage.PREFERENCE_COLLECTION:
-            collected_mvp = context.get('collected_mvp_fields', {})
+            collected_mvp = context.get('mvp_fields', {})
             
             return base_prompt + f"""
 ## Current Stage: PREFERENCE COLLECTION
-Your task: Now that MVP is complete, collect 1-2 key customer preferences.
+Your task: Collect 1-2 key preferences quickly.
 
-MVP Collection Complete: {collected_mvp}
+Current MVP: {collected_mvp}
 
-Present these preference options to the customer:
-1. Maximum acceptable interest rate (e.g., "no more than 8%")
-2. Maximum monthly payment budget (e.g., "no more than $5,000 per month")
-3. Preferred loan term (e.g., "5 years maximum")
-4. Minimum loan amount needed (e.g., "at least $200,000")
+INSTRUCTIONS:
+- Ask for maximum 2 preferences
+- Do NOT explain why you need preferences
+- Present options concisely
+- Accept if customer wants to skip preferences
 
-Guidelines:
-- Explain that this will help you provide better recommendations
-- Ask customer to choose 1-2 most important preferences
-- Accept specific values (e.g., "8% maximum rate")
-- Allow customer to skip preferences if they wish
-- Do NOT start product matching until they respond about preferences
-- Be clear that this is optional but helpful
+Say: "What matters most to you: maximum interest rate, monthly payment budget, loan term, or minimum loan amount? Pick 1-2 or say 'show me options'."
 
-Example: "Great! I have all the basic information needed. To provide you with the most suitable loan recommendations, could you please tell me 1-2 of your most important preferences from the following options: ..."
+Do NOT say lengthy explanations about why preferences help.
 """
         
         elif stage == ConversationStage.PRODUCT_MATCHING:
-            mvp_data = context.get('mvp_data', {})
+            mvp_data = context.get('mvp_fields', {})
             preferences = context.get('preferences', {})
             
             return base_prompt + f"""
 ## Current Stage: PRODUCT MATCHING
-Your task: Match customer profile to best products and present recommendations.
+Your task: Find and recommend the LOWEST RATE product that matches requirements.
 
 Customer Profile:
-MVP Data: {mvp_data}
-Preferences: {preferences}
+- MVP Data: {mvp_data}
+- Preferences: {preferences}
 
-Guidelines:
-- Use the product matching service to find suitable products
-- Present top 3 recommendations with clear explanations
-- Highlight why each product matches their needs
-- Show interest rates, terms, and key features
-- Explain any requirements they meet or need to meet
-- Ask if they want more details about any specific product
+RECOMMENDATION REQUIREMENTS:
+1. Find ALL products customer qualifies for across all 4 lenders
+2. Recommend the ONE with the LOWEST BASE RATE
+3. Include complete product information:
+   - [Lender Name] - [Product Name]
+   - Base Rate and Comparison Rate (calculated)
+   - Monthly payment (if loan amount and term available)
+   - All fees breakdown
+   - All requirements and eligibility status
+   - Complete product details from database
+
+INSTRUCTIONS:
+- Present ONE best recommendation (lowest rate)
+- Show complete calculations
+- List all requirements clearly
+- Do NOT ask follow-up questions about the recommendation
+- Do NOT ask about application process or next steps
 """
         
         elif stage == ConversationStage.GAP_ANALYSIS:
@@ -150,61 +162,60 @@ Guidelines:
             
             return base_prompt + f"""
 ## Current Stage: GAP ANALYSIS
-Your task: Address requirement gaps and offer solutions.
+Your task: Address requirement gaps briefly.
 
 Identified Gaps: {gaps}
 
-Guidelines:
-- Clearly explain what requirements they don't currently meet
-- Suggest practical solutions or alternatives
-- Offer products with more flexible requirements if available
-- Ask if they can address any of the gaps
-- Provide encouragement and options
+INSTRUCTIONS:
+- Explain gaps clearly and concisely
+- Suggest practical solutions
+- Do NOT ask unnecessary follow-up questions
+- Keep it brief and actionable
 """
         
         elif stage == ConversationStage.FINAL_RECOMMENDATION:
             return base_prompt + """
 ## Current Stage: FINAL RECOMMENDATION
-Your task: Provide final product recommendation and next steps.
+Your task: Provide final recommendation only.
 
-Guidelines:
-- Summarize the best product for their situation
-- Explain the application process
-- Mention required documents
-- Offer to connect them with a specialist if needed
-- Ask if they have any final questions
+INSTRUCTIONS:
+- Summarize the recommended product
+- Include all calculated details
+- Do NOT ask about application process
+- Do NOT ask about next steps
+- Keep it concise and complete
 """
         
         elif stage == ConversationStage.HANDOFF:
             return base_prompt + """
 ## Current Stage: HANDOFF
-Your task: Professionally transfer to human specialist.
+Your task: Transfer to specialist briefly.
 
-Guidelines:
-- Explain that a specialist will provide personalized assistance
-- Summarize what you've discussed
-- Assure them their information will be passed along
-- Provide contact information or next steps
+INSTRUCTIONS:
+- Brief handoff message
+- Summarize key points
+- Do NOT ask additional questions
 """
         
         return base_prompt + """
 ## Current Stage: GENERAL CONVERSATION
-Your task: Provide helpful information while maintaining conversation flow.
+Your task: Provide helpful information concisely.
 
-Guidelines:
-- Answer questions professionally
-- Guide conversation toward loan needs if appropriate
-- Maintain friendly and helpful tone
+INSTRUCTIONS:
+- Answer questions directly
+- Do NOT repeat customer information
+- Keep responses brief and focused
 """
     
-    def create_chat_messages(self, user_message: str, stage: ConversationStage, context: Dict[str, Any] = None, chat_history: list = None) -> list:
+    def create_chat_messages(self, user_message: str, stage: ConversationStage, 
+                           context: Dict[str, Any] = None, chat_history: list = None) -> list:
         """Create complete chat message list with stage-specific system prompt"""
         
         messages = [
             {"role": "system", "content": self.create_system_prompt(stage, context)}
         ]
         
-        # Add chat history if provided
+        # Add chat history to maintain memory
         if chat_history:
             for chat in chat_history:
                 if "user" in chat and "assistant" in chat:
