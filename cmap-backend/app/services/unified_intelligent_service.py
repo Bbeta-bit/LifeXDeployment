@@ -6,9 +6,46 @@ import httpx
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
-from dotenv import load_dotenv
 
-load_dotenv(dotenv_path="API.env")
+def get_api_key():
+    """安全地获取API密钥"""
+    
+    # 方式1：从系统环境变量获取（Render生产环境）
+    key = os.getenv("ANTHROPIC_API_KEY")
+    
+    if key:
+        print(f"✅ API密钥已从环境变量加载: {key[:10]}...{key[-4:]}")
+        return key
+    
+    # # 方式2：从本地API.env文件获取（开发环境）
+    # env_file = "API.env"
+    # if os.path.exists(env_file):
+    #     try:
+    #         with open(env_file, 'r') as f:
+    #             for line in f:
+    #                 line = line.strip()
+    #                 if line.startswith("ANTHROPIC_API_KEY="):
+    #                     key = line.split("=", 1)[1].strip()
+    #                     print(f"✅ API密钥已从{env_file}加载: {key[:10]}...{key[-4:]}")
+    #                     return key
+    #     except Exception as e:
+    #         print(f"⚠️ 读取{env_file}文件失败: {e}")
+    
+    # # 方式3：从python-dotenv加载（如果安装了的话）
+    # try:
+    #     from dotenv import load_dotenv
+    #     load_dotenv(dotenv_path="API.env")
+    #     key = os.getenv("ANTHROPIC_API_KEY")
+    #     if key:
+    #         print("✅ API密钥已通过dotenv加载")
+    #         return key
+    except ImportError:
+        pass
+    
+    # 没找到密钥
+    print("❌ 未找到ANTHROPIC_API_KEY")
+    print("📋 请设置环境变量或创建API.env文件")
+    return None
 
 class ConversationStage(Enum):
     GREETING = "greeting"
@@ -73,14 +110,8 @@ class UnifiedIntelligentService:
     """统一的智能服务，集成MVP提取、产品匹配、和对话管理"""
     
     def __init__(self):
-        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.anthropic_api_key = get_api_key()
         self.api_url = "https://api.anthropic.com/v1/messages"
-        
-        # 检查API密钥
-        if not self.anthropic_api_key:
-            print("❌ ANTHROPIC_API_KEY not found in environment")
-        else:
-            print("✅ Anthropic API key loaded")
         
         # 加载产品文档
         self.product_docs = self._load_all_product_docs()

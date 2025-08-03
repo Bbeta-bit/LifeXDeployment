@@ -2,12 +2,38 @@
 
 import os
 import sys
-from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-# 加载环境变量
-load_dotenv(dotenv_path="API.env")
+# 安全的环境变量加载
+def load_claude_api_key():
+    """安全地加载Claude API密钥"""
+    
+    # 从系统环境变量获取
+    key = os.getenv("ANTHROPIC_API_KEY")
+    
+    if key:
+        print(f"✅ 从环境变量加载API密钥: {key[:10]}...{key[-4:]}")
+        return key
+    
+    # 从本地文件获取
+    if os.path.exists("API.env"):
+        try:
+            with open("API.env", 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("ANTHROPIC_API_KEY="):
+                        key = line.split("=", 1)[1].strip()
+                        print(f"✅ 从API.env文件加载密钥: {key[:10]}...{key[-4:]}")
+                        return key
+        except Exception as e:
+            print(f"⚠️ 读取API.env失败: {e}")
+    
+    print("❌ 未找到ANTHROPIC_API_KEY")
+    return None
+
+# 加载API密钥
+CLAUDE_API_KEY = load_claude_api_key()
 
 # 创建FastAPI应用
 app = FastAPI(

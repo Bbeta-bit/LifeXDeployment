@@ -1,1 +1,61 @@
+# .gitignore - 添加到你的项目根目录
+
+# API Keys and Environment Files - 最重要！
 API.env
+.env
+.env.local
+.env.production
+.env.staging
+*.env
+
+# Secrets and Keys
+secrets/
+keys/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Local config
+config.local.json
+settings.local.py
