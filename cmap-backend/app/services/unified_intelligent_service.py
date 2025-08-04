@@ -1,7 +1,8 @@
-# app/services/unified_intelligent_service.py - 修复版本
+
+
+import os
 import json
 import re
-import os
 import httpx
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
@@ -17,30 +18,32 @@ def get_api_key():
         print(f"✅ API密钥已从环境变量加载: {key[:10]}...{key[-4:]}")
         return key
     
-    # # 方式2：从本地API.env文件获取（开发环境）
-    # env_file = "API.env"
-    # if os.path.exists(env_file):
-    #     try:
-    #         with open(env_file, 'r') as f:
-    #             for line in f:
-    #                 line = line.strip()
-    #                 if line.startswith("ANTHROPIC_API_KEY="):
-    #                     key = line.split("=", 1)[1].strip()
-    #                     print(f"✅ API密钥已从{env_file}加载: {key[:10]}...{key[-4:]}")
-    #                     return key
-    #     except Exception as e:
-    #         print(f"⚠️ 读取{env_file}文件失败: {e}")
+    # 方式2：从本地API.env文件获取（开发环境）
+    env_file = "API.env"
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("ANTHROPIC_API_KEY="):
+                        key = line.split("=", 1)[1].strip()
+                        print(f"✅ API密钥已从{env_file}加载: {key[:10]}...{key[-4:]}")
+                        return key
+        except Exception as e:
+            print(f"⚠️ 读取{env_file}文件失败: {e}")
     
-    # # 方式3：从python-dotenv加载（如果安装了的话）
-    # try:
-    #     from dotenv import load_dotenv
-    #     load_dotenv(dotenv_path="API.env")
-    #     key = os.getenv("ANTHROPIC_API_KEY")
-    #     if key:
-    #         print("✅ API密钥已通过dotenv加载")
-    #         return key
+    # 方式3：从python-dotenv加载（如果安装了的话）
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path="API.env")
+        key = os.getenv("ANTHROPIC_API_KEY")
+        if key:
+            print("✅ API密钥已通过dotenv加载")
+            return key
     except ImportError:
-        pass
+        print("ℹ️ python-dotenv not available, using direct file reading")
+    except Exception as e:
+        print(f"⚠️ dotenv加载失败: {e}")
     
     # 没找到密钥
     print("❌ 未找到ANTHROPIC_API_KEY")
@@ -110,6 +113,7 @@ class UnifiedIntelligentService:
     """统一的智能服务，集成MVP提取、产品匹配、和对话管理"""
     
     def __init__(self):
+        # 使用安全的API密钥加载
         self.anthropic_api_key = get_api_key()
         self.api_url = "https://api.anthropic.com/v1/messages"
         
@@ -126,6 +130,8 @@ class UnifiedIntelligentService:
         
         # 偏好字段 - 用户提供的偏好享有相同权重
         self.preference_fields = ["interest_rate_ceiling", "monthly_budget", "min_loan_amount", "preferred_term"]
+        
+    
         
     def _load_all_product_docs(self) -> Dict[str, str]:
         """加载所有lender的产品文档"""
