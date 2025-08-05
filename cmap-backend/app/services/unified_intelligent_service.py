@@ -1,5 +1,3 @@
-
-
 import os
 import json
 import re
@@ -182,6 +180,68 @@ class UnifiedIntelligentService:
             required_fields.extend(self.vehicle_specific_fields)
         
         return required_fields
+
+    def _calculate_monthly_payment(self, loan_amount: float, annual_rate: float, term_months: int) -> float:
+        """计算月供"""
+        if loan_amount <= 0 or annual_rate <= 0 or term_months <= 0:
+            return 0
+        
+        monthly_rate = annual_rate / 100 / 12
+        
+        if monthly_rate == 0:
+            return loan_amount / term_months
+        
+        monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** term_months) / ((1 + monthly_rate) ** term_months - 1)
+        return round(monthly_payment, 2)
+
+    def _calculate_comparison_rate(self, base_rate: float, establishment_fee: float, monthly_fee: float, 
+                                 loan_amount: float, term_months: int) -> float:
+        """计算包含费用的comparison rate"""
+        if loan_amount <= 0 or term_months <= 0:
+            return base_rate
+        
+        # 计算总费用
+        total_fees = establishment_fee + (monthly_fee * term_months)
+        
+        # 费用对利率的影响 (简化计算)
+        fee_rate_impact = (total_fees / loan_amount) * (12 / term_months) * 100
+        
+        comparison_rate = base_rate + fee_rate_impact
+        return round(comparison_rate, 2)
+
+    def _get_structured_product_info(self) -> str:
+        """从产品文档中提取结构化信息"""
+        
+        structured_info = """
+ANGLE FINANCE:
+- Primary01: 7.99%, 10yr max, Property+Credit 500-650, ABN>=2yr, GST>=1yr, Max $100k Low Doc
+- Primary04: 10.05%, 10yr max, Non-property, ABN>=2yr, GST>=1yr
+- Secondary01: 10.45%, 10yr max, Property+Credit 500-650
+- Tertiary01: 12.95%, 10yr max, Property+Credit 500-650
+- Startup01: 12.95%, Property, ABN<2yr, Full Doc only
+- A+ Rate: 6.99%, Property+Company/Trust/Partnership, ABN>=4yr, GST>=2yr, Credit 550+
+- Fees: Setup $540/$700, Monthly $4.95, Brokerage up to 8%
+
+RAF (RESIMAC):
+- Vehicle 0-3yr: 6.89%, Property Premium tier, Credit 600+, Max $450k
+- Vehicle >3yr: 7.49%, Property Premium tier, Credit 600+, Max $450k  
+- Equipment Primary: 7.89%, Property Premium, Max $450k
+- Secured Business: 8.99%-9.50%, 1st mortgage, Max $5M, LVR 70%
+- Fees: Setup $495, Monthly $4.95, Private sale +$695, Brokerage 5.5%
+
+FCAU (FLEXICOMMERCIAL):
+- FlexiPremium: 6.85%-7.74%, Company/Trust only, ABN>=4yr, GST>=4yr, Max $500k
+- FlexiCommercial Primary: 8.15%-12.90%, ABN>=4yr, Max $500k single deal
+- FlexiAssist: 15%-18%, Credit 300+, Max $150k, Past defaults accepted
+- Fees: Setup $495/$745, Monthly $4.95, Brokerage 3-6%
+
+BFS (BRANDED FINANCIAL):
+- Prime Commercial: 7.65%-9.80%, ABN holders, Credit 600+ (500 with 20% deposit)
+- Prime Consumer: 8.80%-12.40%, PAYG income, Credit 600+ (500 with 20% deposit)  
+- Plus: 15.98%, Credit 500+, Bank statements mandatory, Max $100k
+- Fees: Setup $490-$650, Monthly $8, Early termination varies
+"""
+        return structured_info
 
     async def process_conversation(self, user_message: str, session_id: str = "default", 
                                  chat_history: List[Dict] = None) -> Dict[str, Any]:
@@ -699,7 +759,7 @@ Extraction rules:
         # 确保只有一个推荐
         best_recommendation = recommendations[0] if isinstance(recommendations, list) else recommendations
         
-        message = self._format_recommendation_message(best_recommendation, state["customer_profile"])
+        message = self._format_comprehensive_recommendation_message(best_recommendation, state["customer_profile"])
         
         return {
             "message": message,
@@ -707,9 +767,9 @@ Extraction rules:
         }
 
     async def _ai_product_matching(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
-        """修复后的产品匹配方法 - 带详细调试和fallback"""
+        """增强的产品匹配方法 - 包含完整产品信息"""
         
-        print(f"🎯 Starting AI product matching...")
+        print(f"🎯 Starting enhanced AI product matching...")
         print(f"📊 Customer profile: loan_type={profile.loan_type}, asset_type={profile.asset_type}")
         print(f"📊 Property status={profile.property_status}, credit_score={profile.credit_score}")
         print(f"📊 ABN years={profile.ABN_years}, GST years={profile.GST_years}")
@@ -718,9 +778,9 @@ Extraction rules:
             # 检查API密钥
             if not self.anthropic_api_key:
                 print("⚠️ No Anthropic API key - using fallback recommendation")
-                return [self._create_smart_fallback_recommendation(profile)]
+                return [self._create_comprehensive_fallback_recommendation(profile)]
             
-            # 简化的客户档案描述 - 减少token使用
+            # 简化的客户档案描述
             profile_summary = f"""
 Customer Profile:
 - Type: {profile.loan_type or 'business'} loan for {profile.asset_type or 'vehicle'}
@@ -731,28 +791,63 @@ Customer Profile:
 - Vehicle: {profile.vehicle_make or ''} {profile.vehicle_model or ''}
 """
 
-            # 大幅简化的系统提示
-            system_prompt = f"""You are a loan product expert. Based on the customer profile, recommend the BEST single product.
+            # 获取结构化产品信息
+            condensed_products = self._get_structured_product_info()
 
+            # 增强的系统提示 - 要求完整产品信息，去除推荐理由
+            system_prompt = f"""Find the best loan product match for this customer.
+
+CUSTOMER PROFILE:
 {profile_summary}
 
-Available Lenders:
-- RAF: Best rates 6.89%-7.49% for property owners, vehicle finance specialist
-- FCAU: Commercial equipment 6.85%-15.90%, business customers only
-- BFS: Vehicle loans 8.80%-15.98%, flexible consumer and commercial
-- Angle: Asset finance 7.99%-16.95%, includes startups
+PRODUCT DATABASE:
+{condensed_products}
 
-Return ONLY a JSON object:
+Return ONLY a JSON object with COMPLETE information:
 {{
     "lender_name": "RAF",
     "product_name": "Vehicle Finance Premium",
     "base_rate": 6.89,
+    "comparison_rate": 7.12,
+    "monthly_payment": 1250,
     "max_loan_amount": "$450,000",
     "loan_term_options": "12-60 months",
     "requirements_met": true,
     "documentation_type": "Low Doc",
-    "why_recommended": "Best rate for property owners"
-}}"""
+    
+    "detailed_requirements": {{
+        "minimum_credit_score": "600",
+        "abn_years_required": "2+",
+        "gst_years_required": "1+", 
+        "property_ownership": "Required",
+        "deposit_required": "0% (asset-backed)",
+        "asset_age_limit": "25 years at end-of-term"
+    }},
+    
+    "fees_breakdown": {{
+        "establishment_fee": "$495",
+        "monthly_account_fee": "$4.95",
+        "private_sale_surcharge": "$695",
+        "brokerage_cap": "5.5%"
+    }},
+    
+    "rate_conditions": {{
+        "rate_loadings": "+2% private sale, +2% classic car",
+        "balloon_options": "Up to 50% (36m), 45% (48m), 40% (60m)"
+    }},
+    
+    "documentation_requirements": [
+        "Application and privacy consent",
+        "Asset and liability statement",
+        "90-day bank statements (if Full Doc)"
+    ]
+}}
+
+IMPORTANT: 
+- comparison_rate = base_rate + fees impact (typically +0.2% to +0.5%)
+- monthly_payment calculated for ${profile.desired_loan_amount or 50000} over 60 months
+- Include ALL eligibility requirements, fees, and conditions
+- DO NOT include why_recommended field"""
 
             headers = {
                 "x-api-key": self.anthropic_api_key,
@@ -762,18 +857,17 @@ Return ONLY a JSON object:
 
             payload = {
                 "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 1000,  # 增加token限制
+                "max_tokens": 1500,  # 增加token限制以容纳完整信息
                 "temperature": 0.1,
                 "system": system_prompt,
                 "messages": [
-                    {"role": "user", "content": "Find the best loan product for this customer."}
+                    {"role": "user", "content": "Find the best loan product for this customer with complete details."}
                 ]
             }
 
-            print(f"📤 Sending request to Claude API...")
-            print(f"📏 System prompt length: {len(system_prompt)} characters")
+            print(f"📤 Sending enhanced request to Claude API...")
 
-            async with httpx.AsyncClient(timeout=60.0) as client:  # 增加超时时间
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(self.api_url, headers=headers, json=payload)
                 
                 print(f"📥 Claude API response status: {response.status_code}")
@@ -800,136 +894,311 @@ Return ONLY a JSON object:
                     
                     try:
                         recommendation = json.loads(clean_response)
-                        print(f"✅ Successfully parsed recommendation: {recommendation.get('lender_name', 'Unknown')}")
+                        print(f"✅ Successfully parsed enhanced recommendation: {recommendation.get('lender_name', 'Unknown')}")
                         print(f"📋 Product: {recommendation.get('product_name', 'Unknown')}")
-                        print(f"💰 Rate: {recommendation.get('base_rate', 'Unknown')}%")
+                        print(f"💰 Base Rate: {recommendation.get('base_rate', 'Unknown')}%")
+                        print(f"💳 Comparison Rate: {recommendation.get('comparison_rate', 'Unknown')}%")
+                        print(f"💵 Monthly Payment: ${recommendation.get('monthly_payment', 'Unknown')}")
                         return [recommendation]
                         
                     except json.JSONDecodeError as e:
                         print(f"❌ JSON parsing failed: {e}")
                         print(f"📝 Failed content: {clean_response}")
-                        print("🔄 Using fallback recommendation...")
-                        return [self._create_smart_fallback_recommendation(profile)]
-                
-                elif response.status_code == 401:
-                    print("❌ API Authentication failed - check your API key")
-                    return [self._create_smart_fallback_recommendation(profile)]
-                
-                elif response.status_code == 429:
-                    print("❌ API Rate limit exceeded")
-                    return [self._create_smart_fallback_recommendation(profile)]
+                        print("🔄 Using comprehensive fallback recommendation...")
+                        return [self._create_comprehensive_fallback_recommendation(profile)]
                 
                 else:
                     print(f"❌ API error: {response.status_code} - {response.text[:200]}")
-                    return [self._create_smart_fallback_recommendation(profile)]
+                    return [self._create_comprehensive_fallback_recommendation(profile)]
                     
-        except httpx.TimeoutException:
-            print("⏰ API request timed out")
-            return [self._create_smart_fallback_recommendation(profile)]
-            
         except Exception as e:
-            print(f"❌ Unexpected error in AI product matching: {e}")
-            import traceback
-            traceback.print_exc()
-            return [self._create_smart_fallback_recommendation(profile)]
+            print(f"❌ Unexpected error in enhanced AI product matching: {e}")
+            return [self._create_comprehensive_fallback_recommendation(profile)]
 
-    def _create_smart_fallback_recommendation(self, profile: CustomerProfile) -> Dict[str, Any]:
-        """创建智能的fallback推荐"""
+    def _create_comprehensive_fallback_recommendation(self, profile: CustomerProfile) -> Dict[str, Any]:
+        """创建包含完整信息的智能后备推荐"""
         
-        print("🔄 Creating smart fallback recommendation...")
+        print("🔄 Creating comprehensive fallback recommendation...")
         print(f"📊 Profile analysis: property={profile.property_status}, credit={profile.credit_score}")
+        
+        # 估算贷款金额用于月供计算
+        loan_amount = profile.desired_loan_amount or 50000
+        term_months = 60
         
         # 智能规则匹配
         if (profile.property_status == "property_owner" and 
             profile.credit_score and profile.credit_score >= 600):
             print("✅ Matched: Property owner with good credit -> RAF Premium")
+            
+            base_rate = 6.89
+            establishment_fee = 495
+            monthly_fee = 4.95
+            comparison_rate = self._calculate_comparison_rate(base_rate, establishment_fee, monthly_fee, loan_amount, term_months)
+            monthly_payment = self._calculate_monthly_payment(loan_amount, base_rate, term_months)
+            
             return {
                 "lender_name": "RAF",
-                "product_name": "Vehicle Finance Premium",
-                "base_rate": 6.89,
+                "product_name": "Vehicle Finance Premium (0-3 years)",
+                "base_rate": base_rate,
+                "comparison_rate": comparison_rate,
+                "monthly_payment": monthly_payment,
                 "max_loan_amount": "$450,000",
                 "loan_term_options": "12-60 months",
                 "requirements_met": True,
                 "documentation_type": "Low Doc",
-                "why_recommended": "Excellent rates for property owners with strong credit profile"
+                
+                "detailed_requirements": {
+                    "minimum_credit_score": "600 (Premium tier)",
+                    "abn_years_required": "2+ years",
+                    "gst_years_required": "2+ years", 
+                    "property_ownership": "Required (or spouse property)",
+                    "deposit_required": "0% if asset-backed, 10% if non-asset-backed",
+                    "business_structure": "Any structure accepted",
+                    "asset_age_limit": "Vehicle max 25 years at end-of-term"
+                },
+                
+                "fees_breakdown": {
+                    "establishment_fee": "$495",
+                    "monthly_account_fee": "$4.95",
+                    "private_sale_surcharge": "$695",
+                    "ppsr_fee": "At cost",
+                    "brokerage_cap": "5.5% (no rate impact)"
+                },
+                
+                "rate_conditions": {
+                    "base_rate_range": "6.89% (new vehicles 0-3 years)",
+                    "premium_discount": "-0.50% for Premium tier customers",
+                    "rate_loadings": "+2% private sale, +2% classic car, +2% prime mover",
+                    "balloon_options": "Up to 50% (36m), 45% (48m), 40% (60m)"
+                },
+                
+                "documentation_requirements": [
+                    "Application and privacy consent",
+                    "Asset and liability statement",
+                    "12-month ATO portal history (Lite-Doc)",
+                    "2 latest BAS portals",
+                    "90-day bank statements (Full-Doc only)",
+                    "Recent financial statements (Full-Doc)"
+                ]
             }
         
-        elif profile.loan_type == "commercial" and profile.ABN_years and profile.ABN_years >= 2:
-            print("✅ Matched: Established business -> FCAU Commercial")
+        elif profile.loan_type == "commercial" and profile.ABN_years and profile.ABN_years >= 4:
+            print("✅ Matched: Established business -> FCAU FlexiPremium")
+            
+            base_rate = 6.85
+            establishment_fee = 495
+            monthly_fee = 4.95
+            comparison_rate = self._calculate_comparison_rate(base_rate, establishment_fee, monthly_fee, loan_amount, term_months)
+            monthly_payment = self._calculate_monthly_payment(loan_amount, base_rate, term_months)
+            
             return {
                 "lender_name": "FCAU",
-                "product_name": "FlexiCommercial Primary",
-                "base_rate": 8.65,
+                "product_name": "FlexiPremium Standard",
+                "base_rate": base_rate,
+                "comparison_rate": comparison_rate,
+                "monthly_payment": monthly_payment,
                 "max_loan_amount": "$500,000",
                 "loan_term_options": "12-84 months",
                 "requirements_met": True,
                 "documentation_type": "Standard",
-                "why_recommended": "Competitive commercial vehicle finance for established businesses"
+                
+                "detailed_requirements": {
+                    "minimum_credit_score": "Clear Equifax file required",
+                    "abn_years_required": "4+ years (asset-backed) or 8+ years (non-asset-backed)",
+                    "gst_years_required": "4+ years",
+                    "property_ownership": "Asset-backed or non-asset-backed accepted",
+                    "business_structure": "Company, Trust, or Partnership only",
+                    "asset_age_limit": "Primary: 20 years, Secondary: 7 years"
+                },
+                
+                "fees_breakdown": {
+                    "establishment_fee": "$495 (dealer), $745 (private)",
+                    "monthly_account_fee": "$4.95",
+                    "ppsr_fee": "At cost",
+                    "brokerage_cap": "3% (FlexiPremium special cap)"
+                },
+                
+                "rate_conditions": {
+                    "base_rate_grid": "6.85% (50k-100k), 6.85% (100k-500k)",
+                    "rate_loadings": "+1% prime mover/private sale, +1.25% non-asset-backed",
+                    "maximum_cumulative_uplift": "4%"
+                },
+                
+                "documentation_requirements": [
+                    "Standard application",
+                    "Privacy consent",
+                    "Asset and liability statement", 
+                    "Clear Equifax file",
+                    "Asset inspection (broker or digital)",
+                    "Statutory declaration (if required)"
+                ]
             }
         
         elif (profile.asset_type == "motor_vehicle" and 
               profile.credit_score and profile.credit_score >= 550):
             print("✅ Matched: Vehicle loan with decent credit -> BFS Prime")
+            
+            base_rate = 9.50
+            establishment_fee = 490
+            monthly_fee = 8.00
+            comparison_rate = self._calculate_comparison_rate(base_rate, establishment_fee, monthly_fee, loan_amount, term_months)
+            monthly_payment = self._calculate_monthly_payment(loan_amount, base_rate, term_months)
+            
             return {
                 "lender_name": "BFS",
-                "product_name": "Prime Vehicle Loan",
-                "base_rate": 9.50,
+                "product_name": "Prime Consumer Vehicle Loan",
+                "base_rate": base_rate,
+                "comparison_rate": comparison_rate,
+                "monthly_payment": monthly_payment,
                 "max_loan_amount": "$250,000",
                 "loan_term_options": "12-84 months",
                 "requirements_met": True,
                 "documentation_type": "Standard",
-                "why_recommended": "Flexible vehicle financing with good rates for your credit profile"
+                
+                "detailed_requirements": {
+                    "minimum_credit_score": "600 (or 500 with 20% deposit)",
+                    "income_verification": "Most recent payslip with YTD figures",
+                    "deposit_required": "20% if credit score 500-599",
+                    "vehicle_usage": "50%+ personal use",
+                    "asset_age_limit": "13 years (≤60m terms), 7 years (>60m terms)"
+                },
+                
+                "fees_breakdown": {
+                    "establishment_fee": "$490 (consumer), $590 (private sale)",
+                    "monthly_account_fee": "$8.00",
+                    "early_termination_fee": "$750 reducing over time",
+                    "private_sale_surcharge": "+0.50% rate loading"
+                },
+                
+                "rate_conditions": {
+                    "base_rate_range": "8.80%-12.40% based on credit score",
+                    "asset_backed_rates": "Lower rates for asset-backed loans",
+                    "balloon_options": "Limited commercial use only"
+                },
+                
+                "documentation_requirements": [
+                    "Most recent payslip (including YTD)",
+                    "Proof of identity and residency",
+                    "Vehicle purchase contract/invoice",
+                    "Insurance certificate of currency",
+                    "Bank statements (if required for capacity)"
+                ]
             }
         
         else:
             print("✅ Default match: General purpose -> Angle Finance")
+            
+            base_rate = 10.75
+            establishment_fee = 540
+            monthly_fee = 4.95
+            comparison_rate = self._calculate_comparison_rate(base_rate, establishment_fee, monthly_fee, loan_amount, term_months)
+            monthly_payment = self._calculate_monthly_payment(loan_amount, base_rate, term_months)
+            
             return {
                 "lender_name": "Angle",
                 "product_name": "Primary Asset Finance",
-                "base_rate": 10.75,
-                "max_loan_amount": "$100,000",
+                "base_rate": base_rate,
+                "comparison_rate": comparison_rate,
+                "monthly_payment": monthly_payment,
+                "max_loan_amount": "$100,000 (Low Doc)",
                 "loan_term_options": "12-60 months",
                 "requirements_met": True,
                 "documentation_type": "Low Doc",
-                "why_recommended": "Flexible asset financing solution suitable for your requirements"
+                
+                "detailed_requirements": {
+                    "minimum_credit_score": "500-650 range",
+                    "abn_years_required": "2+ years",
+                    "gst_years_required": "1+ years",
+                    "property_ownership": "Preferred but not required",
+                    "deposit_required": "20% if non-property owner",
+                    "business_structure": "Any structure",
+                    "asset_age_limit": "Varies by asset type"
+                },
+                
+                "fees_breakdown": {
+                    "establishment_fee": "$540 (dealer), $700 (private)",
+                    "monthly_account_fee": "$4.95",
+                    "brokerage_cap": "Up to 8% (with rate loading)"
+                },
+                
+                "rate_conditions": {
+                    "base_rate_range": "7.99%-16.95% depending on product",
+                    "rate_loadings": "Various based on risk factors",
+                    "balloon_options": "Limited availability"
+                },
+                
+                "documentation_requirements": [
+                    "Application form",
+                    "Privacy consent", 
+                    "6 months bank statements (Full Doc)",
+                    "Financial statements (if required)",
+                    "Asset inspection reports"
+                ]
             }
 
-    def _get_condensed_product_docs(self) -> str:
-        """获取压缩的产品文档用于AI匹配"""
-        condensed = ""
-        for lender, doc in self.product_docs.items():
-            if doc:
-                # 只取前1000字符避免token超限
-                condensed += f"\n## {lender} Products:\n{doc[:1000]}\n"
-        return condensed
-
-    def _format_recommendation_message(self, recommendation: Dict[str, Any], profile: CustomerProfile) -> str:
-        """格式化推荐消息"""
+    def _format_comprehensive_recommendation_message(self, recommendation: Dict[str, Any], profile: CustomerProfile) -> str:
+        """格式化完整推荐消息 - 去除推荐理由，包含所有信息"""
         try:
             lender = recommendation.get("lender_name", "Unknown")
             product = recommendation.get("product_name", "Unknown Product")
-            rate = recommendation.get("base_rate", 0)
+            base_rate = recommendation.get("base_rate", 0)
+            comparison_rate = recommendation.get("comparison_rate", 0)
+            monthly_payment = recommendation.get("monthly_payment", 0)
             
-            message = f"Based on your profile, I recommend:\n\n"
-            message += f"**{lender} - {product}**\n"
-            message += f"• Interest Rate: {rate}% p.a.\n"
+            message = f"**{lender} - {product}**\n\n"
             
+            # 核心贷款信息
+            message += f"**💰 LOAN DETAILS:**\n"
+            message += f"• Interest Rate: {base_rate}% p.a.\n"
+            if comparison_rate:
+                message += f"• Comparison Rate: {comparison_rate}% p.a.*\n"
+            if monthly_payment:
+                loan_amount = profile.desired_loan_amount or 50000
+                message += f"• Monthly Payment: ${monthly_payment:,.2f}** (${loan_amount:,.0f} over 60 months)\n"
             if recommendation.get("max_loan_amount"):
                 message += f"• Maximum Loan: {recommendation['max_loan_amount']}\n"
-            
             if recommendation.get("loan_term_options"):
                 message += f"• Loan Terms: {recommendation['loan_term_options']}\n"
             
-            if recommendation.get("documentation_type"):
-                message += f"• Documentation: {recommendation['documentation_type']}\n"
+            # 详细要求
+            detailed_req = recommendation.get("detailed_requirements", {})
+            if detailed_req:
+                message += f"\n**📋 ELIGIBILITY REQUIREMENTS:**\n"
+                for req_key, req_value in detailed_req.items():
+                    readable_key = req_key.replace("_", " ").title()
+                    message += f"• {readable_key}: {req_value}\n"
             
-            if recommendation.get("why_recommended"):
-                message += f"\n{recommendation['why_recommended']}"
+            # 费用明细
+            fees = recommendation.get("fees_breakdown", {})
+            if fees:
+                message += f"\n**💳 FEES:**\n"
+                for fee_key, fee_value in fees.items():
+                    readable_key = fee_key.replace("_", " ").title()
+                    message += f"• {readable_key}: {fee_value}\n"
+            
+            # 利率条件
+            rate_conditions = recommendation.get("rate_conditions", {})
+            if rate_conditions:
+                message += f"\n**📊 RATE CONDITIONS:**\n"
+                for rate_key, rate_value in rate_conditions.items():
+                    readable_key = rate_key.replace("_", " ").title()
+                    message += f"• {readable_key}: {rate_value}\n"
+            
+            # 文档要求
+            doc_requirements = recommendation.get("documentation_requirements", [])
+            if doc_requirements:
+                message += f"\n**📄 DOCUMENTATION REQUIRED:**\n"
+                for doc in doc_requirements:
+                    message += f"• {doc}\n"
+            
+            # 免责声明
+            message += f"\n*Comparison rate includes fees and charges"
+            message += f"\n**Monthly payment estimate - actual may vary based on final terms"
             
             return message
             
         except Exception as e:
-            print(f"Error formatting recommendation: {e}")
+            print(f"Error formatting comprehensive recommendation: {e}")
             return "I found a suitable loan product for you. Please contact us for more details."
 
     def _serialize_customer_profile(self, profile: CustomerProfile) -> Dict[str, Any]:
