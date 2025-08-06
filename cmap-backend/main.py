@@ -68,11 +68,6 @@ except ImportError:
         print(f"❌ Unified service not available: {e}")
         UNIFIED_SERVICE_AVAILABLE = False
 
-# 检查Claude API配置
-CLAUDE_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-if not CLAUDE_API_KEY:
-    print("⚠️ ANTHROPIC_API_KEY not found in API.env")
-
 # 初始化服务
 unified_service = None
 if UNIFIED_SERVICE_AVAILABLE:
