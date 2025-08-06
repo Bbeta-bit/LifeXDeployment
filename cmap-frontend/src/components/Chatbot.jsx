@@ -1,11 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { sendMessageToChatAPI, sendEnhancedMessage, resetConversation, healthCheck } from '../services/api.js';
 
 const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [apiStatus, setApiStatus] = useState({ healthy: true, enhanced: true });
+  const [apiStatus, setApiStatus] = useState({ healthy: false, enhanced: false });
   
   // 会话状态
   const [sessionId, setSessionId] = useState('');
@@ -15,6 +14,116 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
   
   const chatRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // API functions - 直接在组件内定义
+  const API_BASE_URL = 'http://localhost:8000';
+
+  const sendMessageToChatAPI = async (message) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.reply || 'Sorry, I could not process your request.';
+    } catch (error) {
+      console.error('API call failed:', error);
+      throw error;
+    }
+  };
+
+  const sendEnhancedMessage = async (message, sessionId = null, chatHistory = []) => {
+    try {
+      const payload = {
+        message: message,
+        session_id: sessionId || `session_${Date.now()}`,
+        history: chatHistory
+      };
+
+      console.log('Sending enhanced message:', payload);
+
+      const response = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('Enhanced API response:', data);
+
+      return {
+        reply: data.reply,
+        session_id: data.session_id,
+        stage: data.stage,
+        customer_profile: data.customer_profile,
+        recommendations: data.recommendations || [],
+        next_questions: data.next_questions || [],
+        round_count: data.round_count,
+        status: data.status || 'success'
+      };
+    } catch (error) {
+      console.error('Enhanced API call failed:', error);
+      throw error;
+    }
+  };
+
+  const healthCheck = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/health`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Health check failed:', error);
+      throw error;
+    }
+  };
+
+  const resetConversation = async (sessionId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/reset-conversation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Reset conversation failed:', error);
+      throw error;
+    }
+  };
 
   // 生成会话ID
   useEffect(() => {
@@ -28,7 +137,10 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
   // 检查API健康状态
   const checkAPIHealth = async () => {
     try {
+      console.log('Checking API health...');
       const health = await healthCheck();
+      console.log('Health check result:', health);
+      
       setApiStatus({
         healthy: health.status === 'healthy',
         enhanced: health.unified_service === 'available'
@@ -37,10 +149,14 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
       if (health.unified_service !== 'available') {
         setUseEnhancedAPI(false);
         console.warn('Enhanced API not available, falling back to basic API');
+      } else {
+        console.log('Enhanced API available');
+        setUseEnhancedAPI(true);
       }
     } catch (error) {
       console.error('Health check failed:', error);
       setApiStatus({ healthy: false, enhanced: false });
+      setUseEnhancedAPI(false);
     }
   };
 
@@ -126,7 +242,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
         }
       } else {
         // 使用基础API
-        replyText = await sendMessageToChatAPI(currentInput);
+        try {
+          replyText = await sendMessageToChatAPI(currentInput);
+        } catch (basicError) {
+          console.error('Basic API also failed:', basicError);
+          throw basicError;
+        }
       }
       
       // 添加AI回复
@@ -154,7 +275,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
       let errorMessage = "I'm experiencing technical difficulties. Please try again in a moment.";
       
       if (!apiStatus.healthy) {
-        errorMessage = "The service is currently unavailable. Please check your connection and try again.";
+        errorMessage = "The service is currently unavailable. Please check that the backend server is running on http://localhost:8000";
       }
       
       const botErrorMessage = { 
@@ -220,6 +341,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
       console.error('Error resetting conversation:', error);
       setMessages([]);
     }
+  };
+
+  // 重新检查API健康状态的按钮
+  const retryConnection = async () => {
+    console.log('Retrying connection...');
+    await checkAPIHealth();
   };
 
   // 获取阶段显示名称
@@ -295,9 +422,13 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
 
         {/* Controls */}
         <div className="absolute right-4 top-2 flex items-center space-x-2">
-          {/* API Status Indicator */}
+          {/* API Status Indicator with Retry */}
           <div className="flex items-center space-x-1">
-            <div className={`w-2 h-2 rounded-full ${apiStatus.healthy ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <button
+              onClick={retryConnection}
+              className={`w-2 h-2 rounded-full cursor-pointer ${apiStatus.healthy ? 'bg-green-500' : 'bg-red-500'}`}
+              title="Click to retry connection"
+            ></button>
             <span className="text-xs text-gray-500">
               {useEnhancedAPI && apiStatus.enhanced ? 'Enhanced' : 'Basic'}
             </span>
@@ -321,6 +452,23 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
           </div>
         )}
       </div>
+
+      {/* Connection Status Banner */}
+      {!apiStatus.healthy && (
+        <div className="bg-red-50 border-b border-red-200 px-4 py-2">
+          <div className="flex items-center justify-between">
+            <div className="text-red-700 text-sm">
+              ⚠️ Cannot connect to backend service. Please ensure the server is running on http://localhost:8000
+            </div>
+            <button
+              onClick={retryConnection}
+              className="text-xs px-2 py-1 bg-red-100 hover:bg-red-200 rounded text-red-700 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Chat Messages */}
       <div
@@ -367,7 +515,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
       </div>
 
       {/* Quick Replies */}
-      {quickReplies.length > 0 && !isLoading && (
+      {quickReplies.length > 0 && !isLoading && apiStatus.healthy && (
         <div className="px-4 py-2 bg-white border-t">
           <div className="flex flex-wrap gap-2">
             {quickReplies.map((reply, index) => (
@@ -403,9 +551,11 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
             onKeyDown={handleKeyDown}
             rows={1}
             placeholder={
-              conversationStage === 'greeting' 
-                ? "Tell me about your loan requirements..." 
-                : "Continue the conversation..."
+              apiStatus.healthy 
+                ? (conversationStage === 'greeting' 
+                    ? "Tell me about your loan requirements..." 
+                    : "Continue the conversation...")
+                : "Backend service unavailable - please check server status"
             }
             className="w-full resize-none overflow-hidden rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm"
             disabled={isLoading || !apiStatus.healthy}
@@ -426,6 +576,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
         {!apiStatus.healthy && (
           <div className="mt-2 text-xs text-red-600 text-center">
             Service unavailable - please check your connection
+            <button 
+              onClick={retryConnection}
+              className="ml-2 underline hover:no-underline"
+            >
+              Retry
+            </button>
           </div>
         )}
       </div>
