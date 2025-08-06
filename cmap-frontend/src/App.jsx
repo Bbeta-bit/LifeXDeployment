@@ -1,51 +1,67 @@
 import React, { useState } from 'react';
 import Chatbot from './components/Chatbot';
 import FunctionBar from './components/FunctionBar';
-import DynamicForm from './components/DynamicCustomerForm';
+import DynamicCustomerForm from './components/DynamicCustomerForm'; // Updated to use enhanced version
 import LoanCalculator from './components/LoanCalculator';
+
+// Import other components if they exist
+let CurrentProduct, ProductShowcase;
+try {
+  CurrentProduct = require('./components/CurrentProduct').default;
+} catch {
+  CurrentProduct = () => <div className="p-4"><h2 className="text-lg font-bold">Current Product Information</h2><p>Product information content goes here</p></div>;
+}
+
+try {
+  ProductShowcase = require('./components/ProductShowcase').default;
+} catch {
+  ProductShowcase = () => <div className="p-4"><h2 className="text-lg font-bold">Product Showcase</h2><p>Product showcase content goes here</p></div>;
+}
 
 function App() {
   const [activePanel, setActivePanel] = useState(null);
+  
+  // 对话历史状态 - 统一管理
+  const [conversationHistory, setConversationHistory] = useState([]);
+  
+  // 客户信息状态 - 从dynamic form同步
+  const [customerInfo, setCustomerInfo] = useState({});
 
-  // Mock form data and state
-  const [formData, setFormData] = useState({});
-  const mockSchema = {
-    fields: [
-      { name: 'loanAmount', label: 'Loan Amount', type: 'text', required: true },
-      { name: 'interestRate', label: 'Interest Rate', type: 'text', required: true },
-      { name: 'loanTerm', label: 'Loan Term', type: 'select', required: true, options: [
-        { value: '12', label: '12 Months' },
-        { value: '24', label: '24 Months' },
-        { value: '36', label: '36 Months' }
-      ]},
-      { name: 'income', label: 'Monthly Income', type: 'text', required: true }
-    ]
+  // 处理新消息 - 从Chatbot传来
+  const handleNewMessage = (message) => {
+    setConversationHistory(prev => [...prev, message]);
   };
 
-  // Render different components based on activePanel
+  // 处理表单更新 - 从Dynamic Form传来
+  const handleFormUpdate = (updatedInfo) => {
+    setCustomerInfo(updatedInfo);
+    console.log('Customer info updated:', updatedInfo);
+  };
+
+  // 渲染不同的面板组件
   const renderActivePanel = () => {
     switch (activePanel) {
       case 'Dynamic Form':
         return (
-          <DynamicForm 
-            schema={mockSchema} 
-            formData={formData} 
-            onChange={setFormData} 
+          <DynamicCustomerForm 
+            conversationHistory={conversationHistory}
+            onFormUpdate={handleFormUpdate}
+            initialData={customerInfo}
           />
         );
       case 'Loan Calculator':
-        return <LoanCalculator />;
+        return <LoanCalculator customerInfo={customerInfo} />;
       case 'Current Product Info':
-        return <div className="p-4 h-full overflow-y-auto"><h2 className="text-lg font-bold">Current Product Information</h2><p>Product information content goes here</p></div>;
+        return <CurrentProduct customerInfo={customerInfo} />;
       case 'Product Showcase':
-        return <div className="p-4 h-full overflow-y-auto"><h2 className="text-lg font-bold">Product Showcase</h2><p>Product showcase content goes here</p></div>;
+        return <ProductShowcase customerInfo={customerInfo} />;
       default:
         return null;
     }
   };
 
   return (
-    <div className="h-screen w-screen flex">
+    <div className="h-screen w-screen flex bg-gray-100">
       {/* Left sidebar - fixed width */}
       <FunctionBar activePanel={activePanel} setActivePanel={setActivePanel} />
       
@@ -60,9 +76,22 @@ function App() {
         
         {/* Chatbot - takes remaining space (half or full) */}
         <div className={activePanel ? "flex-1" : "flex-1"}>
-          <Chatbot />
+          <Chatbot 
+            onNewMessage={handleNewMessage}
+            conversationHistory={conversationHistory}
+            customerInfo={customerInfo}
+          />
         </div>
       </div>
+      
+      {/* 调试信息 - 只在开发环境显示 */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="fixed bottom-4 left-20 bg-black bg-opacity-75 text-white text-xs p-2 rounded max-w-xs">
+          <div>Messages: {conversationHistory.length}</div>
+          <div>Extracted Fields: {customerInfo.extracted_fields?.length || 0}</div>
+          <div>Active Panel: {activePanel || 'None'}</div>
+        </div>
+      )}
     </div>
   );
 }
