@@ -1,4 +1,4 @@
-# main.py - 最终精简版本，基于你的unified_intelligent_service设计
+# main.py - 修复 CORS 和路径问题
 
 import os
 import sys
@@ -42,12 +42,23 @@ app = FastAPI(
     version="7.0-final-streamlined"
 )
 
-# CORS配置
+# 增强的 CORS 配置 - 支持所有前端部署平台
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",  # 开发环境
+        "http://localhost:5173",  # Vite 开发服务器
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "https://*.netlify.app",  # Netlify 部署
+        "https://*.vercel.app",   # Vercel 部署
+        "https://*.surge.sh",     # Surge 部署
+        "https://*.github.io",    # GitHub Pages
+        "https://*.pages.dev",    # Cloudflare Pages
+        "*"  # 临时允许所有域名进行调试
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -77,6 +88,18 @@ if UNIFIED_SERVICE_AVAILABLE:
     except Exception as e:
         print(f"❌ Failed to initialize unified service: {e}")
 
+# 添加根路径处理
+@app.get("/")
+async def root():
+    """根路径处理"""
+    return {
+        "message": "Car Loan AI Agent API is running",
+        "version": "7.0-final-streamlined",
+        "status": "online",
+        "health_endpoint": "/health",
+        "chat_endpoint": "/chat"
+    }
+
 @app.post("/chat")
 async def chat(request: Request):
     """精简的聊天端点 - 使用你的unified intelligent service"""
@@ -86,20 +109,24 @@ async def chat(request: Request):
         session_id = data.get("session_id", "default")
         chat_history = data.get("history", [])
         
+        print(f"📨 收到聊天请求: {user_message[:50]}...")
+        
         if not user_message:
             return {"reply": "Please provide a message", "status": "error"}
         
         # 检查服务可用性
         if not UNIFIED_SERVICE_AVAILABLE or not unified_service:
+            print("⚠️ Unified service not available, returning fallback response")
             return {
-                "reply": "Service not available. Please check your unified_intelligent_service.py file.",
-                "status": "error",
+                "reply": "I'm here to help with your loan requirements. However, the advanced features are currently unavailable. Please describe what you're looking to finance and I'll do my best to assist you.",
+                "status": "basic_mode",
                 "error_detail": "unified_intelligent_service not loaded"
             }
         
         if not CLAUDE_API_KEY:
+            print("⚠️ Claude API not configured")
             return {
-                "reply": "Claude API not configured. Please check your API.env file.",
+                "reply": "I'm currently experiencing technical difficulties with my AI processing. Please try again later.",
                 "status": "error",
                 "error_detail": "ANTHROPIC_API_KEY missing"
             }
@@ -110,6 +137,8 @@ async def chat(request: Request):
             session_id=session_id,
             chat_history=chat_history
         )
+        
+        print(f"✅ 处理完成: {result.get('status', 'unknown')}")
         
         # 返回结果（保持与你的设计一致）
         return {
@@ -127,8 +156,11 @@ async def chat(request: Request):
         
     except Exception as e:
         print(f"❌ Chat error: {e}")
+        import traceback
+        traceback.print_exc()
+        
         return {
-            "reply": "I'm experiencing technical difficulties. Please try again.",
+            "reply": "I'm experiencing technical difficulties. Please try again in a moment.",
             "status": "error",
             "error_detail": str(e)
         }
@@ -149,7 +181,7 @@ async def health_check():
         except:
             docs_status = {"error": "could not check docs"}
     
-    return {
+    health_data = {
         "status": "healthy",
         "version": "7.0-final-streamlined",
         "unified_service": service_status,
@@ -162,8 +194,17 @@ async def health_check():
             "round_limits": UNIFIED_SERVICE_AVAILABLE,
             "preference_collection": UNIFIED_SERVICE_AVAILABLE
         },
-        "design_philosophy": "Streamlined conversation with intelligent MVP collection and product matching"
+        "design_philosophy": "Streamlined conversation with intelligent MVP collection and product matching",
+        "cors_enabled": True,
+        "endpoints": {
+            "chat": "/chat",
+            "health": "/health",
+            "root": "/"
+        }
     }
+    
+    print(f"📊 健康检查请求: {health_data['status']}")
+    return health_data
 
 @app.get("/conversation-status/{session_id}")
 async def get_conversation_status(session_id: str):
@@ -246,7 +287,7 @@ async def test_service():
             "status": "error",
             "message": f"Service test failed: {str(e)}",
             "recommendations": [
-                "Check Claude API key in API.env",
+                "Check Claude API key in environment variables",
                 "Verify product documentation files exist",
                 "Check internet connection for API calls"
             ]
@@ -259,14 +300,24 @@ async def debug_info():
         "environment": {
             "python_path": sys.path,
             "current_directory": os.getcwd(),
-            "api_env_exists": os.path.exists("API.env"),
-            "claude_api_configured": bool(CLAUDE_API_KEY)
+            "claude_api_configured": bool(CLAUDE_API_KEY),
+            "environment_vars": {
+                "PORT": os.getenv("PORT", "Not set"),
+                "ANTHROPIC_API_KEY": "Set" if CLAUDE_API_KEY else "Not set"
+            }
         },
         "service_status": {
             "unified_service_available": UNIFIED_SERVICE_AVAILABLE,
             "service_initialized": unified_service is not None
         },
-        "recommendations": []
+        "recommendations": [],
+        "cors_origins": [
+            "http://localhost:3000",
+            "http://localhost:5173", 
+            "https://*.netlify.app",
+            "https://*.vercel.app",
+            "*"
+        ]
     }
     
     # 生成调试建议
@@ -274,7 +325,7 @@ async def debug_info():
         debug_data["recommendations"].append("Place unified_intelligent_service.py in the same directory as main.py or in app/services/")
     
     if not CLAUDE_API_KEY:
-        debug_data["recommendations"].append("Add ANTHROPIC_API_KEY to your API.env file")
+        debug_data["recommendations"].append("Add ANTHROPIC_API_KEY to your environment variables")
     
     if unified_service:
         try:
@@ -286,6 +337,11 @@ async def debug_info():
             debug_data["service_error"] = "Could not access service properties"
     
     return debug_data
+
+# 添加OPTIONS处理（处理预检请求）
+@app.options("/{full_path:path}")
+async def options_handler(request: Request, full_path: str):
+    return {}
 
 if __name__ == "__main__":
     import uvicorn
@@ -302,7 +358,7 @@ if __name__ == "__main__":
     
     if not CLAUDE_API_KEY:
         print("\n⚠️ Claude API key not configured!")
-        print("📝 Add to API.env: ANTHROPIC_API_KEY=sk-ant-your-key-here")
+        print("🔧 Set environment variable: ANTHROPIC_API_KEY=sk-ant-your-key-here")
     
     if UNIFIED_SERVICE_AVAILABLE and CLAUDE_API_KEY:
         print("\n✅ All systems ready!")
@@ -313,37 +369,14 @@ if __name__ == "__main__":
         print("   - 4-round conversation limit")
         print("   - Preference collection")
     
-    print(f"\n🌐 Starting server on http://localhost:8000")
+    # Render 使用环境变量 PORT
+    port = int(os.environ.get("PORT", 8000))
+    print(f"\n🌐 Starting server on http://0.0.0.0:{port}")
     print("📋 API endpoints:")
+    print("   GET  / - Root endpoint")
     print("   POST /chat - Main chat endpoint")
-    print("   GET /health - Health check")
-    print("   GET /test-service - Test service functionality")
-    print("   GET /debug-info - Debug information")
+    print("   GET  /health - Health check")
+    print("   GET  /test-service - Test service functionality")
+    print("   GET  /debug-info - Debug information")
     
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
-# 额外的工具函数
-def check_file_structure():
-    """检查文件结构"""
-    files_to_check = [
-        "unified_intelligent_service.py",
-        "app/services/unified_intelligent_service.py",
-        "API.env",
-        "Angle.md",
-        "BFS.md",
-        "FCAU.md",
-        "RAF.md"
-    ]
-    
-    status = {}
-    for file_path in files_to_check:
-        status[file_path] = "✅ Found" if os.path.exists(file_path) else "❌ Missing"
-    
-    return status
-
-# 运行前的文件检查
-if __name__ == "__main__":
-    print("\n📁 File Structure Check:")
-    file_status = check_file_structure()
-    for file_path, status in file_status.items():
-        print(f"   {file_path}: {status}")
+    uvicorn.run(app, host="0.0.0.0", port=port)

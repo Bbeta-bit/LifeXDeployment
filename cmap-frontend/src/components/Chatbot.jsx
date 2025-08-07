@@ -5,65 +5,143 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [apiStatus, setApiStatus] = useState({ healthy: false, enhanced: false });
+  const [debugInfo, setDebugInfo] = useState('');
   
   // 会话状态
   const [sessionId, setSessionId] = useState('');
   const [conversationStage, setConversationStage] = useState('greeting');
   const [roundCount, setRoundCount] = useState(0);
   const [useEnhancedAPI, setUseEnhancedAPI] = useState(true);
-  const [hasUserStarted, setHasUserStarted] = useState(false); // 新增状态：用户是否已经开始对话
+  const [hasUserStarted, setHasUserStarted] = useState(false);
   
   const chatRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // API functions - 直接在组件内定义
-  // const API_BASE_URL = 'http://localhost:8000';
-  const API_BASE_URL = 'https://your-backend-on-render.onrender.com';
+  // 🔧 请将此处替换为您实际的 Render 后端 URL
+  const API_BASE_URL = 'https://lifex-backend.onrender.com';
+  
+  // 添加调试信息显示
+  const addDebugInfo = (info) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setDebugInfo(prev => `${prev}\n[${timestamp}] ${info}`);
+    console.log(`[DEBUG ${timestamp}] ${info}`);
+  };
 
-  const sendMessageToChatAPI = async (message) => {
+  const healthCheck = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/chat`, {
-        method: 'POST',
+      addDebugInfo(`🔍 健康检查: ${API_BASE_URL}/health`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15秒超时
+      
+      const response = await fetch(`${API_BASE_URL}/health`, {
+        method: 'GET',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
-        body: JSON.stringify({ message }),
+        signal: controller.signal,
+        mode: 'cors', // 明确指定 CORS 模式
       });
-
+      
+      clearTimeout(timeoutId);
+      
+      addDebugInfo(`📡 状态: ${response.status} ${response.statusText}`);
+      
       if (!response.ok) {
+        const errorText = await response.text();
+        addDebugInfo(`❌ HTTP错误: ${errorText}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
+      addDebugInfo(`✅ 健康检查成功`);
+      return data;
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        addDebugInfo(`⏰ 请求超时 (15秒)`);
+      } else if (error.message.includes('CORS')) {
+        addDebugInfo(`🚫 CORS错误 - 跨域请求被阻止`);
+      } else if (error.message.includes('fetch')) {
+        addDebugInfo(`🌐 网络错误 - 无法连接到服务器`);
+        addDebugInfo(`🔗 URL: ${API_BASE_URL}`);
+      } else {
+        addDebugInfo(`❌ 错误: ${error.message}`);
+      }
+      throw error;
+    }
+  };
+
+  const sendMessageToChatAPI = async (message) => {
+    try {
+      addDebugInfo(`📤 发送基础消息`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒超时
+      
+      const response = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({ message }),
+        signal: controller.signal,
+        mode: 'cors',
+      });
+      
+      clearTimeout(timeoutId);
+      
+      addDebugInfo(`📨 响应: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        addDebugInfo(`❌ 聊天API错误: ${errorText}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      addDebugInfo(`✅ 基础API成功`);
       return data.reply || 'Sorry, I could not process your request.';
     } catch (error) {
-      console.error('API call failed:', error);
+      addDebugInfo(`❌ 基础API失败: ${error.message}`);
       throw error;
     }
   };
 
   const sendEnhancedMessage = async (message, sessionId = null, chatHistory = []) => {
     try {
+      addDebugInfo(`🚀 发送增强消息`);
       const payload = {
         message: message,
         session_id: sessionId || `session_${Date.now()}`,
         history: chatHistory
       };
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
       const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: JSON.stringify(payload),
+        signal: controller.signal,
+        mode: 'cors',
       });
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
+        addDebugInfo(`❌ 增强API错误: ${errorText}`);
         throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
       }
 
       const data = await response.json();
+      addDebugInfo(`✅ 增强API成功`);
 
       return {
         reply: data.reply,
@@ -76,28 +154,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
         status: data.status || 'success'
       };
     } catch (error) {
-      console.error('Enhanced API call failed:', error);
-      throw error;
-    }
-  };
-
-  const healthCheck = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/health`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.error('Health check failed:', error);
+      addDebugInfo(`❌ 增强API失败: ${error.message}`);
       throw error;
     }
   };
@@ -106,14 +163,18 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
   useEffect(() => {
     const newSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     setSessionId(newSessionId);
+    addDebugInfo(`🆔 会话开始: ${newSessionId}`);
     
-    // 检查API健康状态
-    checkAPIHealth();
+    // 延迟一点再检查健康状态，给服务器启动时间
+    setTimeout(() => {
+      checkAPIHealth();
+    }, 2000);
   }, []);
 
   // 检查API健康状态
   const checkAPIHealth = async () => {
     try {
+      addDebugInfo(`🔄 开始健康检查...`);
       const health = await healthCheck();
       
       setApiStatus({
@@ -123,11 +184,13 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
       
       if (health.unified_service !== 'available') {
         setUseEnhancedAPI(false);
+        addDebugInfo(`⚠️ 基础模式 - 增强功能不可用`);
       } else {
         setUseEnhancedAPI(true);
+        addDebugInfo(`✅ 完整功能可用`);
       }
     } catch (error) {
-      console.error('Health check failed:', error);
+      addDebugInfo(`💥 健康检查失败`);
       setApiStatus({ healthy: false, enhanced: false });
       setUseEnhancedAPI(false);
     }
@@ -155,7 +218,6 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
-    // 标记用户已经开始对话
     if (!hasUserStarted) {
       setHasUserStarted(true);
     }
@@ -167,7 +229,6 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
     };
     setMessages((prev) => [...prev, userMessage]);
     
-    // 通知父组件有新的用户消息
     if (onNewMessage) {
       onNewMessage({
         role: 'user',
@@ -179,6 +240,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
     const currentInput = input;
     setInput('');
     setIsLoading(true);
+    addDebugInfo(`💬 用户消息: "${currentInput.slice(0, 30)}..."`);
 
     try {
       let replyText = '';
@@ -186,7 +248,6 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
 
       if (useEnhancedAPI && apiStatus.enhanced) {
         try {
-          // 使用增强API
           const chatHistory = messages.map(msg => ({
             role: msg.sender === 'user' ? 'user' : 'assistant',
             content: msg.text
@@ -197,7 +258,6 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
           if (apiResponse && apiResponse.status === 'success') {
             replyText = apiResponse.reply;
             
-            // 更新对话状态
             if (apiResponse.stage) {
               setConversationStage(apiResponse.stage);
             }
@@ -208,21 +268,19 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
             throw new Error('Enhanced API returned error status');
           }
         } catch (enhancedError) {
-          console.warn('Enhanced API failed, falling back to basic API:', enhancedError);
+          addDebugInfo(`⚠️ 回退到基础模式`);
           setUseEnhancedAPI(false);
           replyText = await sendMessageToChatAPI(currentInput);
         }
       } else {
-        // 使用基础API
         try {
           replyText = await sendMessageToChatAPI(currentInput);
         } catch (basicError) {
-          console.error('Basic API also failed:', basicError);
+          addDebugInfo(`💥 基础API也失败`);
           throw basicError;
         }
       }
       
-      // 添加AI回复
       const botMessage = { 
         sender: 'bot', 
         text: replyText,
@@ -230,7 +288,6 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
       };
       setMessages((prev) => [...prev, botMessage]);
       
-      // 通知父组件有新的AI回复
       if (onNewMessage) {
         onNewMessage({
           role: 'assistant',
@@ -238,14 +295,15 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
           timestamp: new Date().toISOString()
         });
       }
+
+      addDebugInfo(`✅ 对话完成`);
     } catch (error) {
-      console.error('Error calling API:', error);
+      addDebugInfo(`💥 发送失败: ${error.message}`);
       
-      // 显示友好的错误信息
       let errorMessage = "I'm experiencing technical difficulties. Please try again in a moment.";
       
       if (!apiStatus.healthy) {
-        errorMessage = "The service is currently unavailable. Please check that the backend server is running.";
+        errorMessage = "The service is currently unavailable. If this is the first request, please wait 30-60 seconds for the service to start up, then try again.";
       }
       
       const botErrorMessage = { 
@@ -276,9 +334,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
     }
   };
 
-  // 生成建议的快速回复 - 修改：初次对话时不显示
   const getQuickReplies = () => {
-    // 如果用户还没开始对话，不显示快速回复
     if (!hasUserStarted) {
       return [];
     }
@@ -311,7 +367,6 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
     <div className="flex flex-col h-full relative" style={{ backgroundColor: '#fef7e8' }}>
       {/* Header */}
       <div className="relative px-6 py-4 shadow-sm border-b" style={{ backgroundColor: '#fef7e8' }}>
-        {/* Logo */}
         <a 
           href="https://lifex.com.au/" 
           target="_blank" 
@@ -325,30 +380,61 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
           />
         </a>
         
-        {/* 居中标题 */}
         <div className="flex justify-center items-center">
           <h1 className="text-xl font-semibold text-gray-800">Agent X</h1>
         </div>
       </div>
 
-      {/* 连接状态横幅（仅在连接失败时显示） */}
+      {/* 连接状态和调试信息 */}
       {!apiStatus.healthy && (
         <div className="border-b border-red-200 px-6 py-3" style={{ backgroundColor: '#fef7e8' }}>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-2">
             <div className="text-red-700 text-sm">
-              ⚠️ Cannot connect to backend service. Please ensure the server is running.
+              ⚠️ 无法连接后端服务
             </div>
-            <button
-              onClick={checkAPIHealth}
-              className="text-xs px-3 py-1 bg-red-100 hover:bg-red-200 rounded text-red-700 transition-colors"
-            >
-              Retry
-            </button>
+            <div className="flex space-x-2">
+              <button
+                onClick={checkAPIHealth}
+                className="text-xs px-3 py-1 bg-red-100 hover:bg-red-200 rounded text-red-700 transition-colors"
+              >
+                重试连接
+              </button>
+              <button
+                onClick={() => setDebugInfo('')}
+                className="text-xs px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-700 transition-colors"
+              >
+                清空日志
+              </button>
+            </div>
+          </div>
+          
+          <div className="text-xs text-gray-600 mb-2">
+            后端URL: <code className="bg-gray-100 px-1 rounded">{API_BASE_URL}</code>
+          </div>
+          
+          {/* 调试信息面板 */}
+          <details className="mt-2">
+            <summary className="cursor-pointer text-xs text-gray-600 hover:text-gray-800">
+              📊 调试信息 (点击查看详细日志)
+            </summary>
+            <div className="mt-2 text-xs bg-gray-100 p-2 rounded overflow-auto max-h-40 text-gray-700">
+              <pre>{debugInfo || '等待调试信息...'}</pre>
+            </div>
+          </details>
+          
+          <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">
+            <strong>💡 常见解决方案:</strong>
+            <ul className="list-disc list-inside mt-1 space-y-1">
+              <li>确认后端URL正确: 检查是否为您实际的Render服务URL</li>
+              <li>Render免费服务冷启动: 首次访问需等待30-60秒</li>
+              <li>检查CORS设置: 确保后端允许前端域名访问</li>
+              <li>网络问题: 检查您的网络连接</li>
+            </ul>
           </div>
         </div>
       )}
 
-      {/* 聊天消息区域 - 更柔和的背景色 */}
+      {/* 聊天消息区域 */}
       <div
         ref={chatRef}
         className="flex-1 overflow-y-auto px-6 py-6 space-y-4"
@@ -376,7 +462,6 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
           </div>
         ))}
         
-        {/* Loading indicator */}
         {isLoading && (
           <div className="flex justify-start">
             <div className="px-5 py-3 rounded-2xl bg-white border text-base text-gray-500 shadow-lg">
@@ -419,7 +504,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder="Tell me about your loan requirements..."
+            placeholder={apiStatus.healthy ? "Tell me about your loan requirements..." : "服务连接中，请稍等..."}
             className="w-full resize-none overflow-hidden rounded-xl border border-gray-300 px-5 py-4 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
             disabled={isLoading || !apiStatus.healthy}
             style={{ minHeight: '56px', maxHeight: '120px' }}
@@ -438,8 +523,11 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
         </div>
         
         {!apiStatus.healthy && (
-          <div className="mt-3 text-sm text-red-600 text-center">
-            Service unavailable - please check your connection
+          <div className="mt-3 text-sm text-center">
+            <span className="text-red-600">服务不可用</span>
+            <span className="text-gray-500 ml-2">
+              {useEnhancedAPI ? '等待增强服务...' : '尝试基础模式...'}
+            </span>
           </div>
         )}
       </div>
