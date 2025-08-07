@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Chatbot from './components/Chatbot';
 import FunctionBar from './components/FunctionBar';
-import DynamicCustomerForm from './components/DynamicCustomerForm'; // Updated to use enhanced version
+import DynamicCustomerForm from './components/DynamicCustomerForm';
 import LoanCalculator from './components/LoanCalculator';
 
 // Import other components if they exist
@@ -35,7 +35,6 @@ function App() {
   // 处理表单更新 - 从Dynamic Form传来
   const handleFormUpdate = (updatedInfo) => {
     setCustomerInfo(updatedInfo);
-    console.log('Customer info updated:', updatedInfo);
   };
 
   // 渲染不同的面板组件
@@ -61,21 +60,29 @@ function App() {
   };
 
   return (
-    <div className="h-screen w-screen flex bg-gray-100">
+    <div className="h-screen w-screen flex" style={{ backgroundColor: '#fef7e8' }}>
       {/* Left sidebar - fixed width */}
       <FunctionBar activePanel={activePanel} setActivePanel={setActivePanel} />
       
-      {/* Main content area */}
+      {/* Main content area - 50/50 split when panel is active */}
       <div className="flex-1 flex">
-        {/* Function panel - shows when activePanel exists, takes half width */}
+        {/* Function panel - 50% width when active */}
         {activePanel && (
-          <div className="flex-1 bg-white border-r shadow-lg overflow-hidden">
+          <div 
+            className="border-r shadow-lg overflow-hidden"
+            style={{ width: '50%', backgroundColor: '#fef7e8' }}
+          >
             {renderActivePanel()}
           </div>
         )}
         
-        {/* Chatbot - takes remaining space (half or full) */}
-        <div className={activePanel ? "flex-1" : "flex-1"}>
+        {/* Chatbot - 50% when panel is active, 100% when no panel */}
+        <div 
+          style={{ 
+            width: activePanel ? '50%' : '100%',
+            backgroundColor: '#fef7e8'
+          }}
+        >
           <Chatbot 
             onNewMessage={handleNewMessage}
             conversationHistory={conversationHistory}
@@ -83,15 +90,6 @@ function App() {
           />
         </div>
       </div>
-      
-      {/* 调试信息 - 只在开发环境显示 */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="fixed bottom-4 left-20 bg-black bg-opacity-75 text-white text-xs p-2 rounded max-w-xs">
-          <div>Messages: {conversationHistory.length}</div>
-          <div>Extracted Fields: {customerInfo.extracted_fields?.length || 0}</div>
-          <div>Active Panel: {activePanel || 'None'}</div>
-        </div>
-      )}
     </div>
   );
 }

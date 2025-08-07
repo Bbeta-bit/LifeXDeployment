@@ -11,7 +11,10 @@ const FunctionBar = ({ activePanel, setActivePanel }) => {
   ];
 
   return (
-    <div className="w-16 bg-white border-r shadow flex flex-col items-center py-4 space-y-4">
+    <div 
+      className="w-16 border-r shadow flex flex-col items-center py-4 space-y-4"
+      style={{ backgroundColor: '#fef7e8' }}
+    >
       {buttons.map(({ label, icon: Icon }) => (
         <div key={label} className="relative group">
           <Button

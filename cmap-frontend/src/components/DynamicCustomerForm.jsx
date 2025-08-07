@@ -436,9 +436,9 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData })
   };
 
   return (
-    <div className="h-full flex flex-col bg-white">
+    <div className="h-full flex flex-col" style={{ backgroundColor: '#fef7e8' }}>
       {/* Header */}
-      <div className="flex-shrink-0 p-6 border-b bg-white">
+      <div className="flex-shrink-0 p-6 border-b" style={{ backgroundColor: '#fef7e8' }}>
         <h2 className="text-2xl font-bold text-gray-900 mb-4">Customer Information</h2>
         
         {/* Controls */}
