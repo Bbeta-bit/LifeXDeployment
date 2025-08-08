@@ -386,12 +386,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         }
       }
       
-      // 添加回复消息
+      // 添加回复消息 - 去掉fallback标记
       const botMessage = { 
         sender: 'bot', 
         text: replyText,
-        timestamp: new Date().toISOString(),
-        fallback: fallbackUsed
+        timestamp: new Date().toISOString()
+        // 去掉fallback字段
       };
       setMessages((prev) => [...prev, botMessage]);
       
@@ -447,54 +447,13 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     }
   };
 
-  // 🔧 改进的快速回复逻辑
-  const getQuickReplies = () => {
-    if (!hasUserStarted || !apiStatus.healthy) {
-      return [];
-    }
-    
-    if (conversationStage === 'greeting' || conversationStage === 'mvp_collection') {
-      return [
-        "I need a car loan",
-        "Business equipment finance",
-        "Show me the lowest rates"
-      ];
-    } else if (conversationStage === 'preference_collection') {
-      return [
-        "Lowest interest rate possible",
-        "I need low monthly payments",
-        "Show me recommendations"
-      ];
-    }
-    return [];
-  };
+  // 去掉快速回复功能
+  // const getQuickReplies = () => {
+  //   // 功能已移除
+  //   return [];
+  // };
 
-  const quickReplies = getQuickReplies();
-
-  // 🔧 改进的连接状态显示
-  const getConnectionStatus = () => {
-    if (apiStatus.healthy) {
-      return {
-        color: 'text-green-600',
-        bg: 'bg-green-50',
-        border: 'border-green-200',
-        icon: '✅',
-        text: 'Connected',
-        detail: useEnhancedAPI ? 'Enhanced Mode' : 'Basic Mode'
-      };
-    } else {
-      return {
-        color: 'text-red-600',
-        bg: 'bg-red-50',
-        border: 'border-red-200', 
-        icon: '❌',
-        text: 'Disconnected',
-        detail: 'Service Unavailable'
-      };
-    }
-  };
-
-  const connectionStatus = getConnectionStatus();
+  // const quickReplies = getQuickReplies();
 
   return (
     <div className="flex flex-col h-full relative" style={{ backgroundColor: '#fef7e8' }}>
@@ -518,61 +477,33 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         </div>
       </div>
 
-      {/* 改进的连接状态显示 */}
+      {/* 只在连接失败时显示错误状态 */}
       {!apiStatus.healthy && (
-        <div className={`border-b px-6 py-3 ${connectionStatus.bg} ${connectionStatus.border}`}>
+        <div className="border-b px-6 py-3 bg-red-50 border-red-200">
           <div className="flex items-center justify-between mb-2">
-            <div className={`${connectionStatus.color} text-sm font-medium`}>
-              {connectionStatus.icon} {connectionStatus.text} - {connectionStatus.detail}
+            <div className="text-red-600 text-sm font-medium">
+              ❌ Service Unavailable
             </div>
-            <div className="flex space-x-2">
-              <button
-                onClick={checkAPIHealth}
-                className={`text-xs px-3 py-1 rounded transition-colors ${connectionStatus.color} bg-white border hover:bg-gray-50`}
-              >
-                重试连接
-              </button>
-              <button
-                onClick={() => setDebugInfo('')}
-                className="text-xs px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-700 transition-colors"
-              >
-                清空日志
-              </button>
-            </div>
+            <button
+              onClick={checkAPIHealth}
+              className="text-xs px-3 py-1 rounded transition-colors text-red-600 bg-white border hover:bg-gray-50"
+            >
+              Retry Connection
+            </button>
           </div>
           
           <div className="text-xs text-gray-600 mb-2 font-mono">
-            后端: {API_BASE_URL}
+            Backend: {API_BASE_URL}
           </div>
-          
-          {/* 调试信息面板 */}
-          <details className="mt-2">
-            <summary className="cursor-pointer text-xs text-gray-600 hover:text-gray-800">
-              🔍 诊断日志 (点击查看详情)
-            </summary>
-            <div className="mt-2 text-xs bg-white p-3 rounded border overflow-auto max-h-40 text-gray-700 font-mono">
-              <pre>{debugInfo || '等待诊断信息...'}</pre>
-            </div>
-          </details>
           
           <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded text-xs">
-            <div className="font-semibold text-blue-800 mb-2">🛠️ 诊断步骤:</div>
+            <div className="font-semibold text-blue-800 mb-2">🛠️ Troubleshooting:</div>
             <ol className="list-decimal list-inside space-y-1 text-blue-700">
-              <li>检查后端URL是否正确: <code className="bg-white px-1 rounded text-blue-800">{API_BASE_URL}</code></li>
-              <li>Render服务冷启动可能需要30-60秒</li>
-              <li>检查浏览器网络和CORS设置</li>
-              <li>如问题持续，请联系技术支持</li>
+              <li>Check backend URL: <code className="bg-white px-1 rounded text-blue-800">{API_BASE_URL}</code></li>
+              <li>Render service cold start may take 30-60 seconds</li>
+              <li>Check browser network and CORS settings</li>
+              <li>Contact technical support if problem persists</li>
             </ol>
-          </div>
-        </div>
-      )}
-
-      {/* 产品推荐状态提示 */}
-      {useEnhancedAPI && apiStatus.enhanced && conversationStage === 'recommendation' && (
-        <div className="px-6 py-2 bg-green-50 border-b border-green-200">
-          <div className="flex items-center text-sm text-green-700">
-            <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
-            产品推荐已生成！请查看"Product Comparison"面板进行比较
           </div>
         </div>
       )}
@@ -601,10 +532,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
               }`}
             >
               {m.text}
-              {/* 显示回退模式标记 */}
-              {m.fallback && (
-                <div className="text-xs text-gray-500 mt-1 italic">基础模式响应</div>
-              )}
+              {/* 去掉回退模式标记显示 */}
             </div>
           </div>
         ))}
@@ -622,26 +550,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         )}
       </div>
 
-      {/* 快速回复按钮 */}
-      {quickReplies.length > 0 && !isLoading && (
-        <div className="px-6 py-3 border-t" style={{ backgroundColor: '#fef7e8' }}>
-          <div className="flex flex-wrap gap-2">
-            {quickReplies.map((reply, index) => (
-              <button
-                key={index}
-                onClick={() => {
-                  setInput(reply);
-                  setTimeout(() => handleSend(), 100);
-                }}
-                className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-full text-gray-700 transition-colors shadow-sm disabled:opacity-50"
-                disabled={!apiStatus.healthy}
-              >
-                {reply}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* 去掉快速回复按钮区域 */}
 
       {/* 输入区域 */}
       <div className="px-6 py-4 border-t shadow-lg" style={{ maxHeight: '20vh', backgroundColor: '#fef7e8' }}>
@@ -652,7 +561,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder={apiStatus.healthy ? "Tell me about your loan requirements..." : "等待服务连接中..."}
+            placeholder={apiStatus.healthy ? "Tell me about your loan requirements..." : "Waiting for service connection..."}
             className="w-full resize-none overflow-hidden rounded-xl border border-gray-300 px-5 py-4 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm disabled:bg-gray-100 disabled:text-gray-500"
             disabled={isLoading || !apiStatus.healthy}
             style={{ minHeight: '56px', maxHeight: '120px' }}
@@ -670,27 +579,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           </button>
         </div>
         
-        {/* 连接状态和功能提示 */}
-        <div className="mt-3 flex justify-between items-center text-sm">
-          <div className="flex items-center space-x-4">
-            <span className={`flex items-center ${connectionStatus.color}`}>
-              <div className={`w-2 h-2 rounded-full mr-1 ${apiStatus.healthy ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              {connectionStatus.text}
-            </span>
-            {apiStatus.enhanced && apiStatus.healthy && (
-              <span className="text-blue-600 flex items-center">
-                <div className="w-2 h-2 bg-blue-500 rounded-full mr-1"></div>
-                Enhanced Mode
-              </span>
-            )}
-          </div>
-          
-          {conversationStage !== 'greeting' && apiStatus.healthy && (
-            <div className="text-xs text-gray-500">
-              💡 产品推荐会出现在比较面板中
-            </div>
-          )}
-        </div>
+        {/* 去掉最下面的连接状态和功能提示 */}
       </div>
     </div>
   );
