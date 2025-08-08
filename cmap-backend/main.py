@@ -1,9 +1,14 @@
-# main.py - 修复 CORS 和路径问题
+# main.py - 修复 CORS 和部署问题
 
 import os
 import sys
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # 安全的环境变量加载
 def load_claude_api_key():
@@ -13,7 +18,7 @@ def load_claude_api_key():
     key = os.getenv("ANTHROPIC_API_KEY")
     
     if key:
-        print(f"✅ 从环境变量加载API密钥: {key[:10]}...{key[-4:]}")
+        logger.info(f"✅ 从环境变量加载API密钥: {key[:10]}...{key[-4:]}")
         return key
     
     # 从本地文件获取
@@ -24,12 +29,12 @@ def load_claude_api_key():
                     line = line.strip()
                     if line.startswith("ANTHROPIC_API_KEY="):
                         key = line.split("=", 1)[1].strip()
-                        print(f"✅ 从API.env文件加载密钥: {key[:10]}...{key[-4:]}")
+                        logger.info(f"✅ 从API.env文件加载密钥: {key[:10]}...{key[-4:]}")
                         return key
         except Exception as e:
-            print(f"⚠️ 读取API.env失败: {e}")
+            logger.warning(f"⚠️ 读取API.env失败: {e}")
     
-    print("❌ 未找到ANTHROPIC_API_KEY")
+    logger.error("❌ 未找到ANTHROPIC_API_KEY")
     return None
 
 # 加载API密钥
@@ -37,46 +42,62 @@ CLAUDE_API_KEY = load_claude_api_key()
 
 # 创建FastAPI应用
 app = FastAPI(
-    title="Car Loan AI Agent - Final Streamlined",
-    description="Streamlined AI loan advisor using unified intelligent service",
-    version="7.0-final-streamlined"
+    title="Car Loan AI Agent - CORS Fixed",
+    description="AI loan advisor with fixed CORS configuration",
+    version="8.0-cors-fixed"
 )
 
-# 增强的 CORS 配置 - 支持所有前端部署平台
+# 🔧 修复的 CORS 配置
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",  # 开发环境
-        "http://localhost:5173",  # Vite 开发服务器
+        "http://localhost:3000",
+        "http://localhost:5173", 
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
-        "https://*.netlify.app",  # Netlify 部署
-        "https://*.vercel.app",   # Vercel 部署
-        "https://*.surge.sh",     # Surge 部署
-        "https://*.github.io",    # GitHub Pages
-        "https://*.pages.dev",    # Cloudflare Pages
-        "*"  # 临时允许所有域名进行调试
+        "https://netlify.app",
+        "https://*.netlify.app",
+        "https://vercel.app", 
+        "https://*.vercel.app",
+        "https://surge.sh",
+        "https://*.surge.sh",
+        "https://github.io",
+        "https://*.github.io",
+        "https://pages.dev",
+        "https://*.pages.dev",
+        # 如果前端部署在这些域名，请添加具体的域名
+        # "https://your-frontend-domain.netlify.app",
+        # "https://your-frontend-domain.vercel.app",
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+    allow_headers=[
+        "Accept",
+        "Accept-Language", 
+        "Content-Language",
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "Origin",
+        "User-Agent",
+        "Cache-Control",
+        "Pragma"
+    ],
 )
 
 # 尝试加载统一智能服务
 try:
-    # 假设unified_intelligent_service.py在app/services/目录下
     sys.path.append('app/services')
     from unified_intelligent_service import UnifiedIntelligentService
     UNIFIED_SERVICE_AVAILABLE = True
-    print("✅ Unified Intelligent Service loaded")
+    logger.info("✅ Unified Intelligent Service loaded")
 except ImportError:
     try:
-        # 或者直接在当前目录
         from unified_intelligent_service import UnifiedIntelligentService
         UNIFIED_SERVICE_AVAILABLE = True
-        print("✅ Unified Intelligent Service loaded from current directory")
+        logger.info("✅ Unified Intelligent Service loaded from current directory")
     except ImportError as e:
-        print(f"❌ Unified service not available: {e}")
+        logger.error(f"❌ Unified service not available: {e}")
         UNIFIED_SERVICE_AVAILABLE = False
 
 # 初始化服务
@@ -84,90 +105,136 @@ unified_service = None
 if UNIFIED_SERVICE_AVAILABLE:
     try:
         unified_service = UnifiedIntelligentService()
-        print("✅ Unified service initialized")
+        logger.info("✅ Unified service initialized")
     except Exception as e:
-        print(f"❌ Failed to initialize unified service: {e}")
+        logger.error(f"❌ Failed to initialize unified service: {e}")
+
+# 🆕 添加 CORS 预检处理
+@app.options("/{full_path:path}")
+async def options_handler(request: Request, full_path: str):
+    """处理 CORS 预检请求"""
+    logger.info(f"OPTIONS request for path: {full_path}")
+    logger.info(f"Origin: {request.headers.get('origin', 'No origin')}")
+    
+    return {
+        "message": "CORS preflight handled",
+        "path": full_path,
+        "origin": request.headers.get('origin', 'No origin')
+    }
 
 # 添加根路径处理
 @app.get("/")
-async def root():
+async def root(request: Request):
     """根路径处理"""
+    origin = request.headers.get('origin', 'No origin')
+    user_agent = request.headers.get('user-agent', 'No user agent')
+    
+    logger.info(f"Root request from origin: {origin}")
+    
     return {
         "message": "Car Loan AI Agent API is running",
-        "version": "7.0-final-streamlined",
+        "version": "8.0-cors-fixed",
         "status": "online",
+        "timestamp": os.environ.get('RENDER_SERVICE_START_TIME', 'unknown'),
+        "origin": origin,
         "health_endpoint": "/health",
-        "chat_endpoint": "/chat"
+        "chat_endpoint": "/chat",
+        "cors_test": "If you see this, CORS is working"
     }
 
 @app.post("/chat")
 async def chat(request: Request):
-    """精简的聊天端点 - 使用你的unified intelligent service"""
+    """聊天端点 - 增强错误处理和日志"""
+    origin = request.headers.get('origin', 'No origin')
+    logger.info(f"Chat request from origin: {origin}")
+    
     try:
         data = await request.json()
         user_message = data.get("message", "")
         session_id = data.get("session_id", "default")
         chat_history = data.get("history", [])
         
-        print(f"📨 收到聊天请求: {user_message[:50]}...")
+        logger.info(f"📨 收到聊天请求: {user_message[:50]}...")
+        logger.info(f"Session: {session_id}, History length: {len(chat_history)}")
         
         if not user_message:
             return {"reply": "Please provide a message", "status": "error"}
         
         # 检查服务可用性
         if not UNIFIED_SERVICE_AVAILABLE or not unified_service:
-            print("⚠️ Unified service not available, returning fallback response")
+            logger.warning("⚠️ Unified service not available, returning fallback response")
             return {
                 "reply": "I'm here to help with your loan requirements. However, the advanced features are currently unavailable. Please describe what you're looking to finance and I'll do my best to assist you.",
                 "status": "basic_mode",
+                "session_id": session_id,
+                "recommendations": [],
+                "next_questions": [],
+                "round_count": 1,
                 "error_detail": "unified_intelligent_service not loaded"
             }
         
         if not CLAUDE_API_KEY:
-            print("⚠️ Claude API not configured")
+            logger.warning("⚠️ Claude API not configured")
             return {
                 "reply": "I'm currently experiencing technical difficulties with my AI processing. Please try again later.",
                 "status": "error",
+                "session_id": session_id,
+                "recommendations": [],
+                "next_questions": [],
+                "round_count": 1,
                 "error_detail": "ANTHROPIC_API_KEY missing"
             }
         
-        # 使用你的统一智能服务处理对话
+        # 使用统一智能服务处理对话
         result = await unified_service.process_conversation(
             user_message=user_message,
             session_id=session_id,
             chat_history=chat_history
         )
         
-        print(f"✅ 处理完成: {result.get('status', 'unknown')}")
+        logger.info(f"✅ 处理完成: {result.get('status', 'unknown')}")
         
-        # 返回结果（保持与你的设计一致）
-        return {
-            "reply": result.get("reply"),
-            "session_id": result.get("session_id"),
-            "stage": result.get("stage"),
-            "customer_profile": result.get("customer_profile"),
+        # 确保返回所有必需字段
+        response = {
+            "reply": result.get("reply", "I apologize, but I couldn't process your request properly."),
+            "session_id": result.get("session_id", session_id),
+            "stage": result.get("stage", "greeting"),
+            "customer_profile": result.get("customer_profile", {}),
             "recommendations": result.get("recommendations", []),
             "next_questions": result.get("next_questions", []),
-            "round_count": result.get("round_count"),
+            "round_count": result.get("round_count", 1),
             "status": result.get("status", "success"),
             "ai_provider": "unified-intelligent-service",
-            "version": "7.0-final-streamlined"
+            "version": "8.0-cors-fixed"
         }
         
+        # 记录推荐数量
+        if response["recommendations"]:
+            logger.info(f"📊 返回 {len(response['recommendations'])} 个推荐")
+        
+        return response
+        
     except Exception as e:
-        print(f"❌ Chat error: {e}")
+        logger.error(f"❌ Chat error: {e}")
         import traceback
         traceback.print_exc()
         
         return {
             "reply": "I'm experiencing technical difficulties. Please try again in a moment.",
             "status": "error",
+            "session_id": session_id if 'session_id' in locals() else "error_session",
+            "recommendations": [],
+            "next_questions": [],
+            "round_count": 1,
             "error_detail": str(e)
         }
 
 @app.get("/health")
-async def health_check():
-    """健康检查"""
+async def health_check(request: Request):
+    """增强的健康检查"""
+    origin = request.headers.get('origin', 'No origin')
+    logger.info(f"Health check from origin: {origin}")
+    
     service_status = "available" if UNIFIED_SERVICE_AVAILABLE and unified_service else "unavailable"
     
     # 检查产品文档加载状态
@@ -178,15 +245,22 @@ async def health_check():
                 lender: "loaded" if doc and len(doc) > 100 else "missing"
                 for lender, doc in unified_service.product_docs.items()
             }
-        except:
-            docs_status = {"error": "could not check docs"}
+        except Exception as e:
+            docs_status = {"error": f"could not check docs: {str(e)}"}
     
     health_data = {
         "status": "healthy",
-        "version": "7.0-final-streamlined",
+        "version": "8.0-cors-fixed",
         "unified_service": service_status,
         "claude_api": "configured" if CLAUDE_API_KEY else "missing",
         "product_docs": docs_status,
+        "origin": origin,
+        "timestamp": os.environ.get('RENDER_SERVICE_START_TIME', 'unknown'),
+        "environment": {
+            "python_version": sys.version,
+            "platform": sys.platform,
+            "working_directory": os.getcwd(),
+        },
         "features": {
             "conversation_stages": UNIFIED_SERVICE_AVAILABLE,
             "mvp_extraction": UNIFIED_SERVICE_AVAILABLE,
@@ -194,29 +268,47 @@ async def health_check():
             "round_limits": UNIFIED_SERVICE_AVAILABLE,
             "preference_collection": UNIFIED_SERVICE_AVAILABLE
         },
-        "design_philosophy": "Streamlined conversation with intelligent MVP collection and product matching",
         "cors_enabled": True,
         "endpoints": {
             "chat": "/chat",
-            "health": "/health",
-            "root": "/"
+            "health": "/health", 
+            "root": "/",
+            "test": "/test-service"
         }
     }
     
-    print(f"📊 健康检查请求: {health_data['status']}")
+    logger.info(f"📊 健康检查完成: {health_data['status']}")
     return health_data
 
+# 🆕 添加简单的 CORS 测试端点
+@app.get("/cors-test")
+async def cors_test(request: Request):
+    """CORS 连接测试"""
+    origin = request.headers.get('origin', 'No origin')
+    logger.info(f"CORS test from origin: {origin}")
+    
+    return {
+        "message": "CORS test successful!",
+        "origin": origin,
+        "headers": dict(request.headers),
+        "timestamp": "2024-12-19T10:00:00Z"
+    }
+
 @app.get("/conversation-status/{session_id}")
-async def get_conversation_status(session_id: str):
+async def get_conversation_status(session_id: str, request: Request):
     """获取对话状态"""
+    origin = request.headers.get('origin', 'No origin')
+    logger.info(f"Conversation status request from origin: {origin}")
+    
     if not unified_service:
-        return {"error": "Service not available"}
+        return {"error": "Service not available", "session_id": session_id}
     
     try:
         status = await unified_service.get_conversation_status(session_id)
         return status
     except Exception as e:
-        return {"error": f"Failed to get status: {str(e)}"}
+        logger.error(f"Failed to get conversation status: {e}")
+        return {"error": f"Failed to get status: {str(e)}", "session_id": session_id}
 
 @app.post("/reset-conversation")
 async def reset_conversation(request: Request):
@@ -225,9 +317,12 @@ async def reset_conversation(request: Request):
         data = await request.json()
         session_id = data.get("session_id", "default")
         
+        logger.info(f"Resetting conversation: {session_id}")
+        
         if unified_service and hasattr(unified_service, 'conversation_states'):
             if session_id in unified_service.conversation_states:
                 del unified_service.conversation_states[session_id]
+                logger.info(f"Conversation {session_id} reset successfully")
         
         return {
             "status": "success",
@@ -235,21 +330,26 @@ async def reset_conversation(request: Request):
             "session_id": session_id
         }
     except Exception as e:
+        logger.error(f"Failed to reset conversation: {e}")
         return {
             "status": "error",
             "message": str(e)
         }
 
 @app.get("/test-service")
-async def test_service():
+async def test_service(request: Request):
     """测试统一服务功能"""
+    origin = request.headers.get('origin', 'No origin')
+    logger.info(f"Service test from origin: {origin}")
+    
     if not unified_service:
         return {
             "status": "error",
             "message": "Unified service not available",
+            "origin": origin,
             "recommendations": [
                 "Check if unified_intelligent_service.py exists",
-                "Ensure all dependencies are installed",
+                "Ensure all dependencies are installed", 
                 "Check the file path and imports"
             ]
         }
@@ -258,6 +358,8 @@ async def test_service():
         # 测试基本功能
         test_session = "test_session"
         test_message = "Hi, I need a business loan for a truck. I own property and have good credit."
+        
+        logger.info("Starting service test...")
         
         result = await unified_service.process_conversation(
             user_message=test_message,
@@ -269,8 +371,11 @@ async def test_service():
         if test_session in unified_service.conversation_states:
             del unified_service.conversation_states[test_session]
         
+        logger.info("Service test completed successfully")
+        
         return {
             "status": "success",
+            "origin": origin,
             "test_result": {
                 "response_generated": bool(result.get("reply")),
                 "stage_detected": result.get("stage"),
@@ -283,8 +388,10 @@ async def test_service():
         }
         
     except Exception as e:
+        logger.error(f"Service test failed: {e}")
         return {
             "status": "error",
+            "origin": origin,
             "message": f"Service test failed: {str(e)}",
             "recommendations": [
                 "Check Claude API key in environment variables",
@@ -293,60 +400,10 @@ async def test_service():
             ]
         }
 
-@app.get("/debug-info")
-async def debug_info():
-    """调试信息"""
-    debug_data = {
-        "environment": {
-            "python_path": sys.path,
-            "current_directory": os.getcwd(),
-            "claude_api_configured": bool(CLAUDE_API_KEY),
-            "environment_vars": {
-                "PORT": os.getenv("PORT", "Not set"),
-                "ANTHROPIC_API_KEY": "Set" if CLAUDE_API_KEY else "Not set"
-            }
-        },
-        "service_status": {
-            "unified_service_available": UNIFIED_SERVICE_AVAILABLE,
-            "service_initialized": unified_service is not None
-        },
-        "recommendations": [],
-        "cors_origins": [
-            "http://localhost:3000",
-            "http://localhost:5173", 
-            "https://*.netlify.app",
-            "https://*.vercel.app",
-            "*"
-        ]
-    }
-    
-    # 生成调试建议
-    if not UNIFIED_SERVICE_AVAILABLE:
-        debug_data["recommendations"].append("Place unified_intelligent_service.py in the same directory as main.py or in app/services/")
-    
-    if not CLAUDE_API_KEY:
-        debug_data["recommendations"].append("Add ANTHROPIC_API_KEY to your environment variables")
-    
-    if unified_service:
-        try:
-            debug_data["product_docs"] = {
-                lender: len(doc) for lender, doc in unified_service.product_docs.items()
-            }
-            debug_data["conversation_states"] = len(unified_service.conversation_states)
-        except:
-            debug_data["service_error"] = "Could not access service properties"
-    
-    return debug_data
-
-# 添加OPTIONS处理（处理预检请求）
-@app.options("/{full_path:path}")
-async def options_handler(request: Request, full_path: str):
-    return {}
-
 if __name__ == "__main__":
     import uvicorn
     
-    print("🚀 Starting Final Streamlined Car Loan AI Agent")
+    print("🚀 Starting Car Loan AI Agent - CORS Fixed Version")
     print(f"Unified Service: {'✅' if UNIFIED_SERVICE_AVAILABLE else '❌'}")
     print(f"Claude API: {'✅' if CLAUDE_API_KEY else '❌'}")
     
@@ -363,11 +420,10 @@ if __name__ == "__main__":
     if UNIFIED_SERVICE_AVAILABLE and CLAUDE_API_KEY:
         print("\n✅ All systems ready!")
         print("🎯 Features enabled:")
-        print("   - Intelligent conversation stages")
-        print("   - MVP field extraction")
-        print("   - Product matching with Claude")
-        print("   - 4-round conversation limit")
-        print("   - Preference collection")
+        print("   - Fixed CORS configuration")
+        print("   - Enhanced error handling")
+        print("   - Detailed logging")
+        print("   - CORS test endpoint")
     
     # Render 使用环境变量 PORT
     port = int(os.environ.get("PORT", 8000))
@@ -376,7 +432,7 @@ if __name__ == "__main__":
     print("   GET  / - Root endpoint")
     print("   POST /chat - Main chat endpoint")
     print("   GET  /health - Health check")
+    print("   GET  /cors-test - CORS connection test")
     print("   GET  /test-service - Test service functionality")
-    print("   GET  /debug-info - Debug information")
     
     uvicorn.run(app, host="0.0.0.0", port=port)

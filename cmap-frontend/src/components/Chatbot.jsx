@@ -17,8 +17,10 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
   const chatRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // 🔧 请将此处替换为您实际的 Render 后端 URL
-  const API_BASE_URL = 'https://lifex-backend.onrender.com';
+  // 🔧 自动检测API URL - 开发和生产环境
+  const API_BASE_URL = process.env.NODE_ENV === 'production' 
+    ? 'https://lifex-backend.onrender.com'  // 生产环境
+    : 'http://localhost:8000';              // 开发环境
   
   // 添加调试信息显示
   const addDebugInfo = (info) => {
@@ -27,12 +29,41 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     console.log(`[DEBUG ${timestamp}] ${info}`);
   };
 
+  // 🆕 CORS 连接测试
+  const corsTest = async () => {
+    try {
+      addDebugInfo(`🧪 CORS测试: ${API_BASE_URL}/cors-test`);
+      
+      const response = await fetch(`${API_BASE_URL}/cors-test`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        mode: 'cors',
+        credentials: 'omit', // 先不使用credentials测试
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        addDebugInfo(`✅ CORS测试成功: ${data.message}`);
+        return true;
+      } else {
+        addDebugInfo(`❌ CORS测试失败: ${response.status}`);
+        return false;
+      }
+    } catch (error) {
+      addDebugInfo(`❌ CORS测试错误: ${error.message}`);
+      return false;
+    }
+  };
+
   const healthCheck = async () => {
     try {
       addDebugInfo(`🔍 健康检查: ${API_BASE_URL}/health`);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15秒超时
+      const timeoutId = setTimeout(() => controller.abort(), 20000); // 增加到20秒
       
       const response = await fetch(`${API_BASE_URL}/health`, {
         method: 'GET',
@@ -41,7 +72,8 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           'Accept': 'application/json',
         },
         signal: controller.signal,
-        mode: 'cors', // 明确指定 CORS 模式
+        mode: 'cors',
+        credentials: 'omit', // 先不使用credentials
       });
       
       clearTimeout(timeoutId);
@@ -56,10 +88,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
 
       const data = await response.json();
       addDebugInfo(`✅ 健康检查成功`);
+      addDebugInfo(`🔧 服务版本: ${data.version || 'unknown'}`);
+      addDebugInfo(`🤖 统一服务: ${data.unified_service || 'unknown'}`);
       return data;
     } catch (error) {
       if (error.name === 'AbortError') {
-        addDebugInfo(`⏰ 请求超时 (15秒)`);
+        addDebugInfo(`⏰ 请求超时 (20秒)`);
       } else if (error.message.includes('CORS')) {
         addDebugInfo(`🚫 CORS错误 - 跨域请求被阻止`);
       } else if (error.message.includes('fetch')) {
@@ -77,7 +111,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       addDebugInfo(`📤 发送基础消息`);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒超时
+      const timeoutId = setTimeout(() => controller.abort(), 35000); // 增加到35秒
       
       const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
@@ -88,6 +122,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         body: JSON.stringify({ message }),
         signal: controller.signal,
         mode: 'cors',
+        credentials: 'omit',
       });
       
       clearTimeout(timeoutId);
@@ -119,7 +154,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       };
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutId = setTimeout(() => controller.abort(), 35000);
 
       const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
@@ -130,6 +165,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         body: JSON.stringify(payload),
         signal: controller.signal,
         mode: 'cors',
+        credentials: 'omit',
       });
       
       clearTimeout(timeoutId);
@@ -164,11 +200,22 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     const newSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     setSessionId(newSessionId);
     addDebugInfo(`🆔 会话开始: ${newSessionId}`);
+    addDebugInfo(`🌍 环境: ${process.env.NODE_ENV || 'development'}`);
+    addDebugInfo(`🔗 API地址: ${API_BASE_URL}`);
     
-    // 延迟一点再检查健康状态，给服务器启动时间
-    setTimeout(() => {
-      checkAPIHealth();
-    }, 2000);
+    // 先进行CORS测试，再进行健康检查
+    setTimeout(async () => {
+      addDebugInfo(`🚀 开始连接测试...`);
+      
+      // Step 1: CORS测试
+      const corsOk = await corsTest();
+      if (!corsOk) {
+        addDebugInfo(`⚠️ CORS测试失败，但继续尝试健康检查...`);
+      }
+      
+      // Step 2: 健康检查
+      await checkAPIHealth();
+    }, 1000);
   }, []);
 
   // 检查API健康状态
@@ -189,10 +236,24 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         setUseEnhancedAPI(true);
         addDebugInfo(`✅ 完整功能可用`);
       }
+      
+      addDebugInfo(`🎯 最终状态: 健康=${health.status === 'healthy'} 增强=${health.unified_service === 'available'}`);
+      
     } catch (error) {
-      addDebugInfo(`💥 健康检查失败`);
+      addDebugInfo(`💥 健康检查失败: ${error.message}`);
       setApiStatus({ healthy: false, enhanced: false });
       setUseEnhancedAPI(false);
+      
+      // 🆕 提供更详细的诊断建议
+      addDebugInfo(`🔧 诊断建议:`);
+      addDebugInfo(`   1. 检查后端服务是否在运行`);
+      addDebugInfo(`   2. 确认URL正确: ${API_BASE_URL}`);
+      addDebugInfo(`   3. 检查网络连接`);
+      addDebugInfo(`   4. 查看浏览器控制台的网络面板`);
+      
+      if (error.message.includes('CORS')) {
+        addDebugInfo(`   5. CORS问题 - 检查后端CORS配置`);
+      }
     }
   };
 
@@ -281,7 +342,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
             throw new Error('Enhanced API returned error status');
           }
         } catch (enhancedError) {
-          addDebugInfo(`⚠️ 回退到基础模式`);
+          addDebugInfo(`⚠️ 回退到基础模式: ${enhancedError.message}`);
           setUseEnhancedAPI(false);
           replyText = await sendMessageToChatAPI(currentInput);
         }
@@ -289,7 +350,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         try {
           replyText = await sendMessageToChatAPI(currentInput);
         } catch (basicError) {
-          addDebugInfo(`💥 基础API也失败`);
+          addDebugInfo(`💥 基础API也失败: ${basicError.message}`);
           throw basicError;
         }
       }
@@ -316,7 +377,13 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       let errorMessage = "I'm experiencing technical difficulties. Please try again in a moment.";
       
       if (!apiStatus.healthy) {
-        errorMessage = "The service is currently unavailable. If this is the first request, please wait 30-60 seconds for the service to start up, then try again.";
+        if (error.message.includes('CORS')) {
+          errorMessage = "There's a connection issue with our servers (CORS error). Please check your network connection or try refreshing the page.";
+        } else if (error.message.includes('timeout') || error.message.includes('AbortError')) {
+          errorMessage = "The request timed out. Our servers might be starting up. Please wait 30-60 seconds and try again.";
+        } else {
+          errorMessage = "Unable to connect to our services. If this is your first visit, please wait 30-60 seconds for the service to start up, then try again.";
+        }
       }
       
       const botErrorMessage = { 
@@ -399,7 +466,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         </div>
       </div>
 
-      {/* 连接状态和调试信息 */}
+      {/* 🆕 增强的连接状态和调试信息 */}
       {!apiStatus.healthy && (
         <div className="border-b border-red-200 px-6 py-3" style={{ backgroundColor: '#fef7e8' }}>
           <div className="flex items-center justify-between mb-2">
@@ -414,6 +481,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
                 重试连接
               </button>
               <button
+                onClick={corsTest}
+                className="text-xs px-3 py-1 bg-blue-100 hover:bg-blue-200 rounded text-blue-700 transition-colors"
+              >
+                测试CORS
+              </button>
+              <button
                 onClick={() => setDebugInfo('')}
                 className="text-xs px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-700 transition-colors"
               >
@@ -422,14 +495,16 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
             </div>
           </div>
           
-          <div className="text-xs text-gray-600 mb-2">
-            后端URL: <code className="bg-gray-100 px-1 rounded">{API_BASE_URL}</code>
+          <div className="text-xs text-gray-600 mb-2 space-y-1">
+            <div>后端URL: <code className="bg-gray-100 px-1 rounded">{API_BASE_URL}</code></div>
+            <div>环境: <code className="bg-gray-100 px-1 rounded">{process.env.NODE_ENV || 'development'}</code></div>
+            <div>浏览器: <code className="bg-gray-100 px-1 rounded">{navigator.userAgent.split(' ')[0]}</code></div>
           </div>
           
           {/* 调试信息面板 */}
           <details className="mt-2">
             <summary className="cursor-pointer text-xs text-gray-600 hover:text-gray-800">
-              📊 调试信息 (点击查看详细日志)
+              📊 详细调试日志 (点击查看)
             </summary>
             <div className="mt-2 text-xs bg-gray-100 p-2 rounded overflow-auto max-h-40 text-gray-700">
               <pre>{debugInfo || '等待调试信息...'}</pre>
@@ -437,18 +512,35 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           </details>
           
           <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">
-            <strong>💡 常见解决方案:</strong>
-            <ul className="list-disc list-inside mt-1 space-y-1">
-              <li>确认后端URL正确: 检查是否为您实际的Render服务URL</li>
-              <li>Render免费服务冷启动: 首次访问需等待30-60秒</li>
-              <li>检查CORS设置: 确保后端允许前端域名访问</li>
-              <li>网络问题: 检查您的网络连接</li>
-            </ul>
+            <strong>🔧 故障排除步骤:</strong>
+            <ol className="list-decimal list-inside mt-1 space-y-1">
+              <li>点击 "测试CORS" 检查跨域连接</li>
+              <li>点击 "重试连接" 重新检查服务状态</li>
+              <li>如果是首次访问，等待30-60秒让服务启动</li>
+              <li>检查浏览器控制台的网络面板是否有错误</li>
+              <li>确认后端URL是否正确：{API_BASE_URL}</li>
+            </ol>
+          </div>
+          
+          {/* 🆕 快速诊断按钮 */}
+          <div className="mt-2 flex space-x-2">
+            <button
+              onClick={() => window.open(`${API_BASE_URL}/health`, '_blank')}
+              className="text-xs px-2 py-1 bg-green-100 hover:bg-green-200 rounded text-green-700 transition-colors"
+            >
+              直接访问健康检查
+            </button>
+            <button
+              onClick={() => window.open(`${API_BASE_URL}`, '_blank')}
+              className="text-xs px-2 py-1 bg-purple-100 hover:bg-purple-200 rounded text-purple-700 transition-colors"
+            >
+              访问API根路径
+            </button>
           </div>
         </div>
       )}
 
-      {/* 🆕 推荐状态提示 */}
+      {/* 推荐状态提示 */}
       {useEnhancedAPI && apiStatus.enhanced && conversationStage === 'recommendation' && (
         <div className="px-6 py-2 bg-green-50 border-b border-green-200" style={{ backgroundColor: '#f0f9ff' }}>
           <div className="flex items-center text-sm text-green-700">
@@ -528,7 +620,11 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder={apiStatus.healthy ? "Tell me about your loan requirements..." : "服务连接中，请稍等..."}
+            placeholder={
+              apiStatus.healthy 
+                ? "Tell me about your loan requirements..." 
+                : "Service unavailable - check connection..."
+            }
             className="w-full resize-none overflow-hidden rounded-xl border border-gray-300 px-5 py-4 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
             disabled={isLoading || !apiStatus.healthy}
             style={{ minHeight: '56px', maxHeight: '120px' }}
@@ -546,19 +642,22 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           </button>
         </div>
         
-        {/* 🆕 连接状态和功能提示 */}
+        {/* 🆕 增强的状态栏 */}
         <div className="mt-3 flex justify-between items-center text-sm">
           <div className="flex items-center space-x-4">
             <span className={`flex items-center ${apiStatus.healthy ? 'text-green-600' : 'text-red-600'}`}>
               <div className={`w-2 h-2 rounded-full mr-1 ${apiStatus.healthy ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              {apiStatus.healthy ? '已连接' : '服务不可用'}
+              {apiStatus.healthy ? 'Connected' : 'Disconnected'}
             </span>
             {apiStatus.enhanced && (
               <span className="text-blue-600 flex items-center">
                 <div className="w-2 h-2 bg-blue-500 rounded-full mr-1"></div>
-                增强模式
+                Enhanced Mode
               </span>
             )}
+            <span className="text-gray-500 text-xs">
+              {API_BASE_URL.includes('localhost') ? 'Development' : 'Production'}
+            </span>
           </div>
           
           {conversationStage !== 'greeting' && apiStatus.healthy && (
