@@ -1,4 +1,4 @@
-# main.py - 全面修复版本
+# main.py - 修复CORS具体域名问题
 
 import os
 import sys
@@ -69,12 +69,12 @@ async def lifespan(app: FastAPI):
 # 创建FastAPI应用
 app = FastAPI(
     title="LIFEX Car Loan AI Agent",
-    description="AI智能贷款顾问 - 修复连接问题版本",
-    version="9.0-connection-fixed",
+    description="AI智能贷款顾问 - 修复CORS域名问题",
+    version="9.1-cors-domain-fixed",
     lifespan=lifespan
 )
 
-# 🔧 完全修复的CORS配置
+# 🔧 修复的CORS配置 - 添加你的具体域名
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -86,16 +86,21 @@ app.add_middleware(
         "http://localhost:3001",
         "http://localhost:8080",
         
-        # 部署平台
+        # 🎯 你的具体部署域名
+        "https://cmap-frontend.onrender.com",  # 从日志中看到的前端域名
+        "https://lifex-frontend.onrender.com", # 可能的备用域名
+        
+        # 其他部署平台模式
         "https://*.netlify.app",
         "https://*.vercel.app", 
         "https://*.surge.sh",
         "https://*.github.io",
         "https://*.pages.dev",
         "https://*.herokuapp.com",
+        "https://*.onrender.com",  # 所有Render域名
         
-        # 如果需要特定域名，添加在这里
-        # "https://your-specific-domain.com",
+        # 通配符支持（作为后备）
+        "*",
     ],
     allow_credentials=True,
     allow_methods=["*"],  # 允许所有HTTP方法
@@ -170,6 +175,11 @@ async def log_requests(request: Request, call_next):
     try:
         response = await call_next(request)
         process_time = asyncio.get_event_loop().time() - start_time
+        
+        # 特别记录CORS相关的响应
+        if method == "OPTIONS":
+            logger.info(f"🔍 CORS预检: {method} {url} - 状态: {response.status_code} - 来源: {origin}")
+        
         logger.info(f"✅ {method} {url} - 状态: {response.status_code} - 耗时: {process_time:.3f}s")
         return response
     except Exception as e:
@@ -177,24 +187,56 @@ async def log_requests(request: Request, call_next):
         logger.error(f"❌ {method} {url} - 错误: {str(e)} - 耗时: {process_time:.3f}s")
         raise
 
-# 🔧 OPTIONS预检请求处理 - 必须放在其他路由之前
+# 🔧 改进的OPTIONS预检请求处理
 @app.options("/{full_path:path}")
 async def handle_options(request: Request, full_path: str):
-    """处理CORS预检请求"""
-    origin = request.headers.get("origin", "无来源")
-    method = request.headers.get("access-control-request-method", "无方法")
-    headers = request.headers.get("access-control-request-headers", "无头部")
+    """处理CORS预检请求 - 修复版本"""
+    origin = request.headers.get("origin", "")
+    method = request.headers.get("access-control-request-method", "")
+    headers = request.headers.get("access-control-request-headers", "")
     
-    logger.info(f"🔍 OPTIONS预检: {full_path} - 来源: {origin} - 方法: {method}")
+    logger.info(f"🔍 OPTIONS预检详情:")
+    logger.info(f"   路径: {full_path}")
+    logger.info(f"   来源: {origin}")
+    logger.info(f"   请求方法: {method}")
+    logger.info(f"   请求头部: {headers}")
+    
+    # 检查是否为已知的前端域名
+    allowed_origins = [
+        "https://cmap-frontend.onrender.com",
+        "https://lifex-frontend.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
+    
+    # 确定允许的来源
+    if origin in allowed_origins or origin.endswith(".onrender.com") or "localhost" in origin:
+        allowed_origin = origin
+        logger.info(f"✅ 允许的来源: {origin}")
+    else:
+        allowed_origin = "*"
+        logger.info(f"⚠️ 未知来源，使用通配符: {origin}")
+    
+    response_headers = {
+        "Access-Control-Allow-Origin": allowed_origin,
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin, User-Agent, Cache-Control, X-Requested-With",
+        "Access-Control-Max-Age": "86400",
+        "Access-Control-Allow-Credentials": "true" if allowed_origin != "*" else "false",
+        "Vary": "Origin"
+    }
+    
+    logger.info(f"📤 CORS响应头: {response_headers}")
     
     return JSONResponse(
-        content={"message": "CORS预检成功", "path": full_path},
-        headers={
-            "Access-Control-Allow-Origin": origin if origin != "无来源" else "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin, User-Agent, Cache-Control",
-            "Access-Control-Max-Age": "86400"
-        }
+        status_code=200,  # 确保返回200状态码
+        content={
+            "message": "CORS预检成功", 
+            "path": full_path,
+            "origin": origin,
+            "allowed": True
+        },
+        headers=response_headers
     )
 
 # 🔧 根路径
@@ -205,7 +247,7 @@ async def root(request: Request):
     
     return {
         "message": "LIFEX Car Loan AI Agent API 运行中",
-        "version": "9.0-connection-fixed",
+        "version": "9.1-cors-domain-fixed",
         "status": "在线",
         "timestamp": str(asyncio.get_event_loop().time()),
         "origin": origin,
@@ -219,7 +261,8 @@ async def root(request: Request):
             "cors_test": "/cors-test",
             "test_service": "/test-service"
         },
-        "cors_status": "已启用"
+        "cors_status": "已启用",
+        "detected_frontend": "https://cmap-frontend.onrender.com"
     }
 
 # 🔧 CORS测试端点
@@ -234,6 +277,7 @@ async def cors_test(request: Request):
         "message": "CORS测试成功！",
         "origin": origin,
         "timestamp": str(asyncio.get_event_loop().time()),
+        "cors_check": "passed",
         "headers_received": {
             "origin": request.headers.get("origin"),
             "user_agent": request.headers.get("user-agent", "")[:100],
@@ -241,11 +285,83 @@ async def cors_test(request: Request):
             "content_type": request.headers.get("content-type")
         },
         "server_info": {
-            "version": "9.0-connection-fixed",
+            "version": "9.1-cors-domain-fixed",
             "python_version": sys.version.split()[0],
             "platform": sys.platform
         }
     }
+
+# 🔧 增强的健康检查端点
+@app.get("/health")
+async def health_check(request: Request):
+    """增强的健康检查端点"""
+    origin = request.headers.get('origin', '无来源')
+    
+    logger.info(f"📊 健康检查请求 - 来源: {origin}")
+    
+    # 检查服务状态
+    service_status = "available" if UNIFIED_SERVICE_AVAILABLE and unified_service else "unavailable"
+    api_status = "configured" if CLAUDE_API_KEY else "missing"
+    
+    # 检查产品文档
+    docs_status = {}
+    if unified_service:
+        try:
+            docs_status = {
+                lender: "loaded" if doc and len(doc) > 100 else "missing"
+                for lender, doc in unified_service.product_docs.items()
+            }
+        except Exception as e:
+            docs_status = {"error": f"无法检查文档: {str(e)}"}
+    
+    health_data = {
+        "status": "healthy",
+        "message": "LIFEX Car Loan AI Agent 运行正常",
+        "version": "9.1-cors-domain-fixed",
+        "timestamp": str(asyncio.get_event_loop().time()),
+        "origin": origin,
+        
+        "services": {
+            "unified_service": service_status,
+            "claude_api": api_status,
+            "product_docs": docs_status
+        },
+        
+        "cors_info": {
+            "enabled": True,
+            "detected_frontend": "https://cmap-frontend.onrender.com",
+            "origin_allowed": origin in ["https://cmap-frontend.onrender.com", "https://lifex-frontend.onrender.com"] or "localhost" in origin or origin == "无来源"
+        },
+        
+        "environment": {
+            "python_version": sys.version.split()[0],
+            "platform": sys.platform,
+            "working_directory": os.getcwd(),
+            "port": os.getenv('PORT', '8000'),
+            "render_service_id": os.getenv('RENDER_SERVICE_ID', '未设置')
+        },
+        
+        "features": {
+            "conversation_stages": UNIFIED_SERVICE_AVAILABLE,
+            "mvp_extraction": UNIFIED_SERVICE_AVAILABLE,
+            "product_matching": UNIFIED_SERVICE_AVAILABLE and bool(CLAUDE_API_KEY),
+            "round_limits": UNIFIED_SERVICE_AVAILABLE,
+            "preference_collection": UNIFIED_SERVICE_AVAILABLE
+        },
+        
+        "endpoints": {
+            "root": "/",
+            "chat": "/chat",
+            "health": "/health",
+            "cors_test": "/cors-test",
+            "test_service": "/test-service",
+            "conversation_status": "/conversation-status/{session_id}",
+            "reset_conversation": "/reset-conversation"
+        }
+    }
+    
+    logger.info(f"📊 健康检查完成: {health_data['status']} - 来源: {origin}")
+    return health_data
 
 # 🔧 增强的聊天端点
 @app.post("/chat")
@@ -353,7 +469,7 @@ async def chat(request: Request):
                 "round_count": result.get("round_count", 1),
                 "status": result.get("status", "success"),
                 "ai_provider": "unified-intelligent-service",
-                "version": "9.0-connection-fixed",
+                "version": "9.1-cors-domain-fixed",
                 "process_time": process_time
             }
             
@@ -403,74 +519,7 @@ async def chat(request: Request):
             }
         )
 
-# 🔧 增强的健康检查
-@app.get("/health")
-async def health_check(request: Request):
-    """增强的健康检查端点"""
-    origin = request.headers.get('origin', '无来源')
-    
-    logger.info(f"📊 健康检查请求 - 来源: {origin}")
-    
-    # 检查服务状态
-    service_status = "available" if UNIFIED_SERVICE_AVAILABLE and unified_service else "unavailable"
-    api_status = "configured" if CLAUDE_API_KEY else "missing"
-    
-    # 检查产品文档
-    docs_status = {}
-    if unified_service:
-        try:
-            docs_status = {
-                lender: "loaded" if doc and len(doc) > 100 else "missing"
-                for lender, doc in unified_service.product_docs.items()
-            }
-        except Exception as e:
-            docs_status = {"error": f"无法检查文档: {str(e)}"}
-    
-    health_data = {
-        "status": "healthy",
-        "message": "LIFEX Car Loan AI Agent 运行正常",
-        "version": "9.0-connection-fixed",
-        "timestamp": str(asyncio.get_event_loop().time()),
-        "origin": origin,
-        
-        "services": {
-            "unified_service": service_status,
-            "claude_api": api_status,
-            "product_docs": docs_status
-        },
-        
-        "environment": {
-            "python_version": sys.version.split()[0],
-            "platform": sys.platform,
-            "working_directory": os.getcwd(),
-            "port": os.getenv('PORT', '8000'),
-            "render_service_id": os.getenv('RENDER_SERVICE_ID', '未设置')
-        },
-        
-        "features": {
-            "conversation_stages": UNIFIED_SERVICE_AVAILABLE,
-            "mvp_extraction": UNIFIED_SERVICE_AVAILABLE,
-            "product_matching": UNIFIED_SERVICE_AVAILABLE and bool(CLAUDE_API_KEY),
-            "round_limits": UNIFIED_SERVICE_AVAILABLE,
-            "preference_collection": UNIFIED_SERVICE_AVAILABLE
-        },
-        
-        "cors_enabled": True,
-        "endpoints": {
-            "root": "/",
-            "chat": "/chat",
-            "health": "/health",
-            "cors_test": "/cors-test",
-            "test_service": "/test-service",
-            "conversation_status": "/conversation-status/{session_id}",
-            "reset_conversation": "/reset-conversation"
-        }
-    }
-    
-    logger.info(f"📊 健康检查完成: {health_data['status']}")
-    return health_data
-
-# 🔧 服务测试端点
+# 其他端点保持不变...
 @app.get("/test-service")
 async def test_service(request: Request):
     """测试统一服务功能"""
@@ -607,10 +656,11 @@ async def reset_conversation(request: Request):
 if __name__ == "__main__":
     import uvicorn
     
-    print("🚀 启动 LIFEX Car Loan AI Agent - 全面修复版")
+    print("🚀 启动 LIFEX Car Loan AI Agent - CORS域名修复版")
     print("=" * 50)
     print(f"统一服务: {'✅ 可用' if UNIFIED_SERVICE_AVAILABLE else '❌ 不可用'}")
     print(f"Claude API: {'✅ 已配置' if CLAUDE_API_KEY else '❌ 未配置'}")
+    print(f"检测到的前端域名: https://cmap-frontend.onrender.com")
     
     if not UNIFIED_SERVICE_AVAILABLE:
         print("\n⚠️  unified_intelligent_service.py 未找到!")
@@ -626,9 +676,9 @@ if __name__ == "__main__":
     if UNIFIED_SERVICE_AVAILABLE and CLAUDE_API_KEY:
         print("\n✅ 所有系统就绪!")
         print("🎯 启用的功能:")
-        print("   - 修复的CORS配置")
-        print("   - 增强的错误处理")
-        print("   - 详细的请求日志")
+        print("   - 修复的CORS配置（包含具体域名）")
+        print("   - 增强的OPTIONS预检处理")
+        print("   - 详细的CORS日志记录")
         print("   - 智能对话管理")
         print("   - 产品推荐系统")
     
