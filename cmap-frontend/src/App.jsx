@@ -3,19 +3,28 @@ import Chatbot from './components/Chatbot';
 import FunctionBar from './components/FunctionBar';
 import DynamicCustomerForm from './components/DynamicCustomerForm';
 import LoanCalculator from './components/LoanCalculator';
+import ProductComparison from './components/ProductComparison';
 
-// Import other components if they exist
-let CurrentProduct, ProductShowcase;
-try {
-  CurrentProduct = require('./components/CurrentProduct').default;
-} catch {
-  CurrentProduct = () => <div className="p-4"><h2 className="text-lg font-bold">Current Product Information</h2><p>Product information content goes here</p></div>;
-}
-
+// Import ProductShowcase component if it exists
+let ProductShowcase;
 try {
   ProductShowcase = require('./components/ProductShowcase').default;
 } catch {
-  ProductShowcase = () => <div className="p-4"><h2 className="text-lg font-bold">Product Showcase</h2><p>Product showcase content goes here</p></div>;
+  ProductShowcase = () => (
+    <div className="p-6 h-full flex flex-col" style={{ backgroundColor: '#fef7e8' }}>
+      <div className="border-b pb-4 mb-6">
+        <h2 className="text-2xl font-bold text-gray-900">Product Showcase</h2>
+        <p className="text-gray-600 mt-1">Market overview and product highlights</p>
+      </div>
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center text-gray-500">
+          <div className="text-6xl mb-4">🏪</div>
+          <p>Product showcase content will be implemented here</p>
+          <p className="text-sm mt-2">Feature coming soon...</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function App() {
@@ -26,6 +35,9 @@ function App() {
   
   // 客户信息状态 - 从dynamic form同步
   const [customerInfo, setCustomerInfo] = useState({});
+  
+  // 推荐产品状态 - 从chatbot传递给ProductComparison
+  const [recommendations, setRecommendations] = useState([]);
 
   // 处理新消息 - 从Chatbot传来
   const handleNewMessage = (message) => {
@@ -35,6 +47,29 @@ function App() {
   // 处理表单更新 - 从Dynamic Form传来
   const handleFormUpdate = (updatedInfo) => {
     setCustomerInfo(updatedInfo);
+  };
+
+  // 处理推荐更新 - 从Chatbot传来
+  const handleRecommendationUpdate = (newRecommendations) => {
+    if (newRecommendations && newRecommendations.length > 0) {
+      setRecommendations(prev => {
+        // 合并新推荐和现有推荐
+        const combined = [...newRecommendations, ...prev];
+        // 去重，基于lender_name和product_name
+        const unique = combined.filter((item, index, self) => 
+          index === self.findIndex(t => 
+            t.lender_name === item.lender_name && t.product_name === item.product_name
+          )
+        );
+        // 只保留最新的3个
+        return unique.slice(0, 3);
+      });
+    }
+  };
+
+  // 清空推荐 - 从ProductComparison传来
+  const handleClearRecommendations = () => {
+    setRecommendations([]);
   };
 
   // 渲染不同的面板组件
@@ -50,10 +85,15 @@ function App() {
         );
       case 'Loan Calculator':
         return <LoanCalculator customerInfo={customerInfo} />;
-      case 'Current Product Info':
-        return <CurrentProduct customerInfo={customerInfo} />;
+      case 'Product Comparison':
+        return (
+          <ProductComparison 
+            recommendations={recommendations}
+            onRecommendationUpdate={handleClearRecommendations}
+          />
+        );
       case 'Product Showcase':
-        return <ProductShowcase customerInfo={customerInfo} />;
+        return <ProductShowcase customerInfo={customerInfo} recommendations={recommendations} />;
       default:
         return null;
     }
@@ -87,6 +127,7 @@ function App() {
             onNewMessage={handleNewMessage}
             conversationHistory={conversationHistory}
             customerInfo={customerInfo}
+            onRecommendationUpdate={handleRecommendationUpdate}
           />
         </div>
       </div>

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
+const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommendationUpdate }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -258,11 +258,24 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
           if (apiResponse && apiResponse.status === 'success') {
             replyText = apiResponse.reply;
             
+            // 🆕 处理推荐信息 - 传递给父组件
+            if (apiResponse.recommendations && apiResponse.recommendations.length > 0) {
+              console.log('📊 收到推荐信息:', apiResponse.recommendations);
+              addDebugInfo(`📊 收到 ${apiResponse.recommendations.length} 个产品推荐`);
+              
+              if (onRecommendationUpdate) {
+                onRecommendationUpdate(apiResponse.recommendations);
+                addDebugInfo(`✅ 推荐信息已传递给ProductComparison`);
+              }
+            }
+            
             if (apiResponse.stage) {
               setConversationStage(apiResponse.stage);
+              addDebugInfo(`🎯 对话阶段更新: ${apiResponse.stage}`);
             }
             if (apiResponse.round_count) {
               setRoundCount(apiResponse.round_count);
+              addDebugInfo(`🔢 对话轮数: ${apiResponse.round_count}`);
             }
           } else {
             throw new Error('Enhanced API returned error status');
@@ -334,6 +347,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
     }
   };
 
+  // 快速回复选项
   const getQuickReplies = () => {
     if (!hasUserStarted) {
       return [];
@@ -434,6 +448,16 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
         </div>
       )}
 
+      {/* 🆕 推荐状态提示 */}
+      {useEnhancedAPI && apiStatus.enhanced && conversationStage === 'recommendation' && (
+        <div className="px-6 py-2 bg-green-50 border-b border-green-200" style={{ backgroundColor: '#f0f9ff' }}>
+          <div className="flex items-center text-sm text-green-700">
+            <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+            Products recommended! Check the Product Comparison panel to compare options.
+          </div>
+        </div>
+      )}
+
       {/* 聊天消息区域 */}
       <div
         ref={chatRef}
@@ -522,14 +546,27 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo }) => {
           </button>
         </div>
         
-        {!apiStatus.healthy && (
-          <div className="mt-3 text-sm text-center">
-            <span className="text-red-600">服务不可用</span>
-            <span className="text-gray-500 ml-2">
-              {useEnhancedAPI ? '等待增强服务...' : '尝试基础模式...'}
+        {/* 🆕 连接状态和功能提示 */}
+        <div className="mt-3 flex justify-between items-center text-sm">
+          <div className="flex items-center space-x-4">
+            <span className={`flex items-center ${apiStatus.healthy ? 'text-green-600' : 'text-red-600'}`}>
+              <div className={`w-2 h-2 rounded-full mr-1 ${apiStatus.healthy ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              {apiStatus.healthy ? '已连接' : '服务不可用'}
             </span>
+            {apiStatus.enhanced && (
+              <span className="text-blue-600 flex items-center">
+                <div className="w-2 h-2 bg-blue-500 rounded-full mr-1"></div>
+                增强模式
+              </span>
+            )}
           </div>
-        )}
+          
+          {conversationStage !== 'greeting' && apiStatus.healthy && (
+            <div className="text-xs text-gray-500">
+              💡 Product recommendations will appear in comparison panel
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
