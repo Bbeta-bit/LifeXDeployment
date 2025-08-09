@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 
 const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
-  const [calculatorMode, setCalculatorMode] = useState('monthly-first'); // 'monthly-first' or 'rate-first'
+  const [calculatorMode, setCalculatorMode] = useState('monthly-first');
   const [inputs, setInputs] = useState({
     loanAmount: customerInfo.desired_loan_amount || '',
     monthlyPayment: '',
@@ -34,7 +34,6 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
     }
 
     if (calculatorMode === 'monthly-first') {
-      // 月供优先模式：用户输入月供，计算利率
       const monthlyPayment = parseFloat(inputs.monthlyPayment);
       if (!monthlyPayment) {
         setResults(null);
@@ -45,7 +44,6 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
         (principal * parseFloat(inputs.balloonPercent) / 100) : 
         parseFloat(inputs.balloonPayment) || 0;
       
-      // 计算所需利率（使用数值方法逼近）
       const requiredRate = calculateRequiredRate(principal, monthlyPayment, termMonths, balloonAmount);
       
       const totalPayments = monthlyPayment * termMonths + balloonAmount;
@@ -61,7 +59,6 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
       });
       
     } else {
-      // 利率优先模式：用户输入利率，计算月供
       const annualRate = parseFloat(inputs.interestRate);
       if (!annualRate) {
         setResults(null);
@@ -101,11 +98,11 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
   // 数值方法计算所需利率
   const calculateRequiredRate = (principal, monthlyPayment, termMonths, balloonAmount) => {
     const targetPmt = monthlyPayment;
-    let rate = 0.001; // 起始利率0.1%
-    let maxRate = 0.5; // 最大利率50%
+    let rate = 0.001;
+    let maxRate = 0.5;
     let minRate = 0;
     
-    for (let i = 0; i < 100; i++) { // 最多迭代100次
+    for (let i = 0; i < 100; i++) {
       const monthlyRate = rate / 12;
       let calculatedPmt;
       
@@ -139,15 +136,84 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
     return rate * 100;
   };
 
-  // 快速金额按钮
+  // 🔧 计算精确的替代方案
+  const calculateAlternativeScenarios = () => {
+    if (!results || !inputs.loanAmount) return null;
+    
+    const principal = parseFloat(inputs.loanAmount);
+    const currentTerm = parseInt(inputs.loanTermMonths);
+    const currentRate = calculatorMode === 'rate-first' ? 
+      parseFloat(inputs.interestRate) : 
+      parseFloat(results.requiredRate);
+    
+    const calculateMonthlyPayment = (amount, rate, term, balloon = 0) => {
+      const monthlyRate = rate / 12 / 100;
+      let payment;
+      
+      if (balloon > 0) {
+        const presentValueOfBalloon = balloon / Math.pow(1 + monthlyRate, term);
+        const loanAmountMinusBalloon = amount - presentValueOfBalloon;
+        payment = (loanAmountMinusBalloon * monthlyRate) / 
+                 (1 - Math.pow(1 + monthlyRate, -term));
+      } else {
+        payment = (amount * monthlyRate) / 
+                 (1 - Math.pow(1 + monthlyRate, -term));
+      }
+      
+      return payment;
+    };
+    
+    const scenarios = [];
+    
+    // 较长期限选项
+    if (currentTerm < 84) {
+      const longerTerm = Math.min(84, currentTerm + 24);
+      const longerPayment = calculateMonthlyPayment(principal, currentRate, longerTerm);
+      scenarios.push({
+        title: "Lower Monthly Payments",
+        description: `Extend to ${longerTerm} months`,
+        payment: longerPayment,
+        savings: parseFloat(results.monthlyPayment) - longerPayment,
+        type: "lower"
+      });
+    }
+    
+    // 较短期限选项
+    if (currentTerm > 36) {
+      const shorterTerm = Math.max(36, currentTerm - 24);
+      const shorterPayment = calculateMonthlyPayment(principal, currentRate, shorterTerm);
+      const interestSavings = (parseFloat(results.monthlyPayment) * currentTerm + parseFloat(results.balloonPayment)) - 
+                             (shorterPayment * shorterTerm);
+      scenarios.push({
+        title: "Pay Off Faster",
+        description: `Reduce to ${shorterTerm} months`,
+        payment: shorterPayment,
+        interestSavings: interestSavings,
+        type: "shorter"
+      });
+    }
+    
+    // 30%尾款选项
+    const balloonAmount = principal * 0.3;
+    const balloonPayment = calculateMonthlyPayment(principal, currentRate, currentTerm, balloonAmount);
+    scenarios.push({
+      title: "Lower Payments with Balloon",
+      description: "30% balloon payment",
+      payment: balloonPayment,
+      balloonDue: balloonAmount,
+      savings: parseFloat(results.monthlyPayment) - balloonPayment,
+      type: "balloon"
+    });
+    
+    return scenarios;
+  };
+
   const quickAmounts = [25000, 50000, 75000, 100000, 150000, 250000];
   
-  // 快速月供按钮（基于贷款金额的常见月供范围）
   const getQuickMonthlyAmounts = () => {
     const loanAmount = parseFloat(inputs.loanAmount);
     if (!loanAmount) return [];
     
-    // 基于6%-15%利率范围计算月供选项
     const lowRate = 6;
     const midRate = 10;
     const highRate = 15;
@@ -170,11 +236,9 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
   const handleInputChange = (field, value) => {
     setInputs(prev => ({ ...prev, [field]: value }));
     
-    // 如果是百分比尾款，清空金额尾款
     if (field === 'balloonPercent' && value) {
       setInputs(prev => ({ ...prev, balloonPayment: '' }));
     }
-    // 如果是金额尾款，清空百分比尾款
     if (field === 'balloonPayment' && value) {
       setInputs(prev => ({ ...prev, balloonPercent: '' }));
     }
@@ -191,6 +255,9 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
     });
     setResults(null);
   };
+
+  // 🔧 获取计算的替代方案
+  const alternativeScenarios = calculateAlternativeScenarios();
 
   return (
     <div className="p-6 space-y-6 h-full overflow-y-auto" style={{ backgroundColor: '#fef7e8' }}>
@@ -245,7 +312,6 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
             className="w-full border border-gray-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="e.g., 75000"
           />
-          {/* 快速金额按钮 */}
           <div className="flex flex-wrap gap-2 mt-2">
             {quickAmounts.map(amount => (
               <button
@@ -278,7 +344,7 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
           </select>
         </div>
 
-        {/* 主要输入 - 根据模式变化 */}
+        {/* 主要输入 */}
         {calculatorMode === 'monthly-first' ? (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -291,7 +357,6 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
               className="w-full border-2 border-blue-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50"
               placeholder="e.g., 1200"
             />
-            {/* 快速月供按钮 */}
             {quickMonthlyAmounts.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-2">
                 <span className="text-xs text-gray-600 self-center">Quick options:</span>
@@ -320,7 +385,6 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
               className="w-full border-2 border-green-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 bg-green-50"
               placeholder="e.g., 7.5"
             />
-            {/* 常见利率按钮 */}
             <div className="flex flex-wrap gap-2 mt-2">
               <span className="text-xs text-gray-600 self-center">Common rates:</span>
               {[6.5, 7.9, 9.5, 11.5, 15.0].map(rate => (
@@ -493,38 +557,47 @@ const EnhancedLoanCalculator = ({ customerInfo = {} }) => {
           </div>
         )}
 
-        {/* 情景分析 */}
-        {results && (
+        {/* 🔧 改进的替代方案分析 */}
+        {results && alternativeScenarios && (
           <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <h4 className="font-semibold text-gray-800 mb-3">💼 Quick Scenarios</h4>
+            <h4 className="font-semibold text-gray-800 mb-3">💼 Alternative Scenarios</h4>
+            <p className="text-xs text-gray-600 mb-4">Compare different loan structures to find what works best for you:</p>
+            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-              <div className="bg-white p-3 rounded border">
-                <p className="font-medium text-green-600">Lower Payments</p>
-                <p className="text-gray-600">
-                  {inputs.loanTermMonths === '84' ? 
-                    'Already at max term' : 
-                    `84 months: ~$${Math.round(parseFloat(results.monthlyPayment) * 0.8)}/month`
-                  }
-                </p>
-              </div>
-              <div className="bg-white p-3 rounded border">
-                <p className="font-medium text-blue-600">Shorter Term</p>
-                <p className="text-gray-600">
-                  {inputs.loanTermMonths === '36' ? 
-                    'Already at min term' : 
-                    `36 months: ~$${Math.round(parseFloat(results.monthlyPayment) * 1.4)}/month`
-                  }
-                </p>
-              </div>
-              <div className="bg-white p-3 rounded border">
-                <p className="font-medium text-purple-600">30% Balloon</p>
-                <p className="text-gray-600">
-                  ~$${Math.round(parseFloat(results.monthlyPayment) * 0.7)}/month
-                </p>
-                <p className="text-xs text-gray-500">
-                  +${Math.round(parseFloat(inputs.loanAmount) * 0.3)} due at end
-                </p>
-              </div>
+              {alternativeScenarios.map((scenario, index) => (
+                <div key={index} className="bg-white p-3 rounded border">
+                  <p className="font-medium text-gray-800 mb-1">{scenario.title}</p>
+                  <p className="text-gray-600 mb-2">{scenario.description}</p>
+                  
+                  <div className="space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Monthly payment:</span>
+                      <span className="font-medium">${Math.round(scenario.payment)}</span>
+                    </div>
+                    
+                    {scenario.savings && scenario.savings > 0 && (
+                      <div className="flex justify-between text-green-600">
+                        <span>Monthly savings:</span>
+                        <span className="font-medium">${Math.round(scenario.savings)}</span>
+                      </div>
+                    )}
+                    
+                    {scenario.interestSavings && scenario.interestSavings > 0 && (
+                      <div className="flex justify-between text-green-600">
+                        <span>Total interest saved:</span>
+                        <span className="font-medium">${Math.round(scenario.interestSavings)}</span>
+                      </div>
+                    )}
+                    
+                    {scenario.balloonDue && (
+                      <div className="flex justify-between text-orange-600">
+                        <span>Final balloon:</span>
+                        <span className="font-medium">${Math.round(scenario.balloonDue)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
             
             {/* 免责声明 */}

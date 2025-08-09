@@ -4,305 +4,75 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [apiStatus, setApiStatus] = useState({ healthy: false, enhanced: false });
-  const [debugInfo, setDebugInfo] = useState('');
-  
-  // 会话状态
+  const [isConnected, setIsConnected] = useState(false);
   const [sessionId, setSessionId] = useState('');
-  const [conversationStage, setConversationStage] = useState('greeting');
-  const [roundCount, setRoundCount] = useState(0);
-  const [useEnhancedAPI, setUseEnhancedAPI] = useState(true);
-  const [hasUserStarted, setHasUserStarted] = useState(false);
   
   const chatRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // 🔧 智能后端URL检测
-  const getBackendURL = () => {
-    // 检查当前环境
-    const hostname = window.location.hostname;
-    const protocol = window.location.protocol;
-    
-    // 生产环境 - 你的 Render 后端
-    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      return 'https://lifex-backend.onrender.com';
-    }
-    
-    // 本地开发环境
-    return 'http://localhost:8000';
-  };
-
-  const API_BASE_URL = getBackendURL();
+  // 固定后端URL
+  const API_BASE_URL = 'https://lifex-backend.onrender.com';
   
-  // 添加调试信息显示
-  const addDebugInfo = (info) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setDebugInfo(prev => `${prev}\n[${timestamp}] ${info}`);
-    console.log(`[DEBUG ${timestamp}] ${info}`);
-  };
+  // 初始化
+  useEffect(() => {
+    // 创建会话ID
+    const newSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    setSessionId(newSessionId);
+    
+    // 添加欢迎消息
+    const welcomeMessage = {
+      sender: 'bot',
+      text: "Hello! I'm Agent X, here to help you find the perfect loan product. Tell me about what you're looking to finance and I'll find the best options for you.",
+      timestamp: new Date().toISOString()
+    };
+    setMessages([welcomeMessage]);
+    
+    // 检查连接
+    checkConnection();
+  }, []);
 
-  // 🔧 改进的健康检查 - 添加重试逻辑
-  const healthCheck = async (retries = 3) => {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        addDebugInfo(`🔍 健康检查 (尝试 ${attempt}/${retries}): ${API_BASE_URL}/health`);
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000); // 增加到20秒
-        
-        const response = await fetch(`${API_BASE_URL}/health`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Cache-Control': 'no-cache',
-          },
-          signal: controller.signal,
-          mode: 'cors',
-        });
-        
-        clearTimeout(timeoutId);
-        
-        addDebugInfo(`📡 状态: ${response.status} ${response.statusText}`);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          addDebugInfo(`❌ HTTP错误: ${errorText.slice(0, 200)}`);
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        addDebugInfo(`✅ 健康检查成功 (尝试 ${attempt})`);
-        return data;
-        
-      } catch (error) {
-        if (error.name === 'AbortError') {
-          addDebugInfo(`⏰ 请求超时 (尝试 ${attempt}/${retries})`);
-        } else if (error.message.includes('CORS')) {
-          addDebugInfo(`🚫 CORS错误 (尝试 ${attempt}/${retries})`);
-        } else if (error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
-          addDebugInfo(`🌐 网络错误 - 无法连接到服务器 (尝试 ${attempt}/${retries})`);
-          addDebugInfo(`🔗 URL: ${API_BASE_URL}`);
-        } else {
-          addDebugInfo(`❌ 错误 (尝试 ${attempt}/${retries}): ${error.message}`);
-        }
-
-        // 如果不是最后一次尝试，等待后重试
-        if (attempt < retries) {
-          const waitTime = attempt * 2000; // 递增等待时间
-          addDebugInfo(`⏳ 等待 ${waitTime/1000}秒 后重试...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-        } else {
-          throw error;
-        }
-      }
-    }
-  };
-
-  // 🔧 改进的基础消息发送
-  const sendMessageToChatAPI = async (message) => {
+  // 简单的连接检查
+  const checkConnection = async () => {
     try {
-      addDebugInfo(`📤 发送基础消息: "${message.slice(0, 30)}..."`);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45000); // 增加超时时间
-      
-      const response = await fetch(`${API_BASE_URL}/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Cache-Control': 'no-cache',
-        },
-        body: JSON.stringify({ message }),
-        signal: controller.signal,
-        mode: 'cors',
-      });
-      
-      clearTimeout(timeoutId);
-      
-      addDebugInfo(`📨 响应: ${response.status}`);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        addDebugInfo(`❌ 聊天API错误: ${errorText.slice(0, 200)}`);
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      addDebugInfo(`✅ 基础API成功`);
-      return data.reply || 'I apologize, but I encountered an issue processing your request.';
-      
-    } catch (error) {
-      addDebugInfo(`❌ 基础API失败: ${error.message}`);
-      throw error;
-    }
-  };
-
-  // 🔧 改进的增强消息发送
-  const sendEnhancedMessage = async (message, sessionId = null, chatHistory = []) => {
-    try {
-      addDebugInfo(`🚀 发送增强消息: "${message.slice(0, 30)}..."`);
-      const payload = {
-        message: message,
-        session_id: sessionId || `session_${Date.now()}`,
-        history: chatHistory.slice(-10) // 只发送最近10条历史记录
-      };
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45000);
-
-      const response = await fetch(`${API_BASE_URL}/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Cache-Control': 'no-cache',
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-        mode: 'cors',
-      });
-      
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        addDebugInfo(`❌ 增强API错误: ${errorText.slice(0, 200)}`);
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      addDebugInfo(`✅ 增强API成功`);
-
-      return {
-        reply: data.reply || 'I apologize for the issue with processing your request.',
-        session_id: data.session_id || sessionId,
-        stage: data.stage || 'greeting',
-        customer_profile: data.customer_profile || {},
-        recommendations: data.recommendations || [],
-        next_questions: data.next_questions || [],
-        round_count: data.round_count || 1,
-        status: data.status || 'success'
-      };
-    } catch (error) {
-      addDebugInfo(`❌ 增强API失败: ${error.message}`);
-      throw error;
-    }
-  };
-
-  // 🔧 CORS 预检测试
-  const testCORS = async () => {
-    try {
-      addDebugInfo(`🧪 测试CORS连接...`);
-      const response = await fetch(`${API_BASE_URL}/cors-test`, {
+      const response = await fetch(`${API_BASE_URL}/health`, {
         method: 'GET',
         mode: 'cors',
-        headers: {
-          'Accept': 'application/json',
-        }
       });
       
       if (response.ok) {
-        const data = await response.json();
-        addDebugInfo(`✅ CORS测试成功: ${data.message}`);
-        return true;
-      } else {
-        addDebugInfo(`❌ CORS测试失败: ${response.status}`);
-        return false;
+        setIsConnected(true);
       }
     } catch (error) {
-      addDebugInfo(`❌ CORS测试错误: ${error.message}`);
-      return false;
+      console.log('Connection check failed:', error);
+      setIsConnected(false);
     }
   };
 
-  // 生成会话ID
-  useEffect(() => {
-    const newSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    setSessionId(newSessionId);
-    addDebugInfo(`🆔 会话开始: ${newSessionId}`);
-    addDebugInfo(`🌐 检测到的后端URL: ${API_BASE_URL}`);
-    
-    // 延迟检查健康状态
-    setTimeout(() => {
-      checkAPIHealth();
-    }, 1000);
-  }, []);
+  // 发送消息
+  const sendMessage = async (message, sessionId, chatHistory = []) => {
+    const response = await fetch(`${API_BASE_URL}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: message,
+        session_id: sessionId,
+        history: chatHistory
+      }),
+      mode: 'cors',
+    });
 
-  // 🔧 改进的API健康状态检查
-  const checkAPIHealth = async () => {
-    try {
-      addDebugInfo(`🔄 开始完整健康检查...`);
-      
-      // 首先测试CORS
-      const corsOk = await testCORS();
-      
-      // 然后测试健康检查
-      const health = await healthCheck(3);
-      
-      const isHealthy = health.status === 'healthy';
-      const hasEnhanced = health.unified_service === 'available';
-      
-      setApiStatus({
-        healthy: isHealthy,
-        enhanced: hasEnhanced
-      });
-      
-      if (!hasEnhanced) {
-        setUseEnhancedAPI(false);
-        addDebugInfo(`⚠️ 基础模式 - 增强功能不可用`);
-      } else {
-        setUseEnhancedAPI(true);
-        addDebugInfo(`✅ 完整功能可用`);
-      }
-      
-      if (isHealthy) {
-        addDebugInfo(`🎉 所有检查通过！`);
-      }
-      
-    } catch (error) {
-      addDebugInfo(`💥 健康检查失败: ${error.message}`);
-      setApiStatus({ healthy: false, enhanced: false });
-      setUseEnhancedAPI(false);
-      
-      // 提供具体的错误诊断
-      if (error.message.includes('CORS')) {
-        addDebugInfo(`🔧 CORS问题 - 请检查后端CORS配置`);
-      } else if (error.message.includes('timeout') || error.name === 'AbortError') {
-        addDebugInfo(`🔧 超时问题 - 后端可能正在冷启动`);
-      } else if (error.message.includes('fetch')) {
-        addDebugInfo(`🔧 网络问题 - 请检查URL和网络连接`);
-      }
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
+
+    return await response.json();
   };
 
-  // 自动滚动到底部
-  useEffect(() => {
-    if (chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  // 欢迎消息
-  useEffect(() => {
-    if (messages.length === 0) {
-      const welcomeMessage = {
-        sender: 'bot',
-        text: "Hello! I'm Agent X, here to help you find the perfect loan product. I can assist with vehicle loans, equipment finance, and business loans.\n\nTell me about what you're looking to finance and I'll find the best options for you.",
-        timestamp: new Date().toISOString()
-      };
-      setMessages([welcomeMessage]);
-    }
-  }, []);
-
-  // 🔧 改进的消息发送处理
+  // 处理发送
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
-
-    if (!hasUserStarted) {
-      setHasUserStarted(true);
-    }
+    if (!input.trim() || isLoading || !sessionId) return;
 
     const userMessage = { 
       sender: 'user', 
@@ -310,8 +80,9 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       timestamp: new Date().toISOString()
     };
     
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages(prev => [...prev, userMessage]);
     
+    // 通知父组件
     if (onNewMessage) {
       onNewMessage({
         role: 'user',
@@ -323,99 +94,57 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     const currentInput = input;
     setInput('');
     setIsLoading(true);
-    addDebugInfo(`💬 用户消息: "${currentInput.slice(0, 50)}..."`);
 
     try {
-      let replyText = '';
-      let apiResponse = null;
-      let fallbackUsed = false;
-
-      // 尝试增强模式
-      if (useEnhancedAPI && apiStatus.enhanced) {
-        try {
-          const chatHistory = messages.map(msg => ({
-            role: msg.sender === 'user' ? 'user' : 'assistant',
-            content: msg.text
-          }));
-
-          apiResponse = await sendEnhancedMessage(currentInput, sessionId, chatHistory);
-          
-          if (apiResponse && apiResponse.status === 'success') {
-            replyText = apiResponse.reply;
-            
-            // 处理推荐信息
-            if (apiResponse.recommendations && apiResponse.recommendations.length > 0) {
-              console.log('📊 收到推荐信息:', apiResponse.recommendations);
-              addDebugInfo(`📊 收到 ${apiResponse.recommendations.length} 个产品推荐`);
-              
-              if (onRecommendationUpdate) {
-                onRecommendationUpdate(apiResponse.recommendations);
-                addDebugInfo(`✅ 推荐信息已传递给ProductComparison`);
-              }
-            }
-            
-            // 更新对话状态
-            if (apiResponse.stage) {
-              setConversationStage(apiResponse.stage);
-              addDebugInfo(`🎯 对话阶段更新: ${apiResponse.stage}`);
-            }
-            if (apiResponse.round_count) {
-              setRoundCount(apiResponse.round_count);
-              addDebugInfo(`🔢 对话轮数: ${apiResponse.round_count}`);
-            }
-          } else {
-            throw new Error('Enhanced API returned non-success status');
+      // 构建完整对话历史
+      const fullChatHistory = [
+        ...conversationHistory,
+        {
+          role: 'user',
+          content: currentInput,
+          timestamp: new Date().toISOString()
+        }
+      ];
+      
+      // 发送到后端
+      const apiResponse = await sendMessage(currentInput, sessionId, fullChatHistory);
+      
+      if (apiResponse && apiResponse.status === 'success') {
+        const replyText = apiResponse.reply;
+        
+        // 处理推荐
+        if (apiResponse.recommendations && apiResponse.recommendations.length > 0) {
+          if (onRecommendationUpdate) {
+            onRecommendationUpdate(apiResponse.recommendations);
           }
-        } catch (enhancedError) {
-          addDebugInfo(`⚠️ 增强API失败，尝试基础模式: ${enhancedError.message}`);
-          fallbackUsed = true;
-          
-          try {
-            replyText = await sendMessageToChatAPI(currentInput);
-          } catch (basicError) {
-            throw basicError;
-          }
+        }
+        
+        // 添加回复
+        const botMessage = { 
+          sender: 'bot', 
+          text: replyText,
+          timestamp: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, botMessage]);
+        
+        // 通知父组件
+        if (onNewMessage) {
+          onNewMessage({
+            role: 'assistant',
+            content: replyText,
+            timestamp: new Date().toISOString()
+          });
         }
       } else {
-        // 直接使用基础模式
-        try {
-          replyText = await sendMessageToChatAPI(currentInput);
-          fallbackUsed = true;
-        } catch (basicError) {
-          throw basicError;
-        }
+        throw new Error('API returned error status');
       }
-      
-      // 添加回复消息 - 去掉fallback标记
-      const botMessage = { 
-        sender: 'bot', 
-        text: replyText,
-        timestamp: new Date().toISOString()
-        // 去掉fallback字段
-      };
-      setMessages((prev) => [...prev, botMessage]);
-      
-      if (onNewMessage) {
-        onNewMessage({
-          role: 'assistant',
-          content: replyText,
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      addDebugInfo(`✅ 对话完成${fallbackUsed ? ' (基础模式)' : ' (增强模式)'}`);
       
     } catch (error) {
-      addDebugInfo(`💥 发送失败: ${error.message}`);
+      console.error('Send failed:', error);
       
-      let errorMessage = "I'm having trouble connecting right now. Please try again in a moment.";
-      
-      if (error.message.includes('timeout') || error.name === 'AbortError') {
-        errorMessage = "The request timed out. The service might be starting up. Please wait 30-60 seconds and try again.";
-      } else if (error.message.includes('CORS')) {
-        errorMessage = "There's a connection issue. Please refresh the page and try again.";
-      } else if (!apiStatus.healthy) {
-        errorMessage = "The service is currently unavailable. Please wait a moment for it to start up and try again.";
+      let errorMessage = "I'm having trouble connecting. Please try again in a moment.";
+      if (error.message.includes('timeout')) {
+        errorMessage = "Request timed out. Please try again.";
       }
       
       const botErrorMessage = { 
@@ -425,13 +154,21 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         isError: true
       };
       
-      setMessages((prev) => [...prev, botErrorMessage]);
+      setMessages(prev => [...prev, botErrorMessage]);
       
     } finally {
       setIsLoading(false);
     }
   };
 
+  // 自动滚动
+  useEffect(() => {
+    if (chatRef.current) {
+      chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // 输入处理
   const handleInputChange = (e) => {
     setInput(e.target.value);
     if (textareaRef.current) {
@@ -447,75 +184,30 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     }
   };
 
-  // 去掉快速回复功能
-  // const getQuickReplies = () => {
-  //   // 功能已移除
-  //   return [];
-  // };
-
-  // const quickReplies = getQuickReplies();
-
   return (
-    <div className="flex flex-col h-full relative" style={{ backgroundColor: '#fef7e8' }}>
+    <div className="flex flex-col h-full" style={{ backgroundColor: '#fef7e8' }}>
       {/* Header */}
-      <div className="relative px-6 py-4 shadow-sm border-b" style={{ backgroundColor: '#fef7e8' }}>
-        <a 
-          href="https://lifex.com.au/" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="absolute left-6 top-4 z-10"
-        >
-          <img 
-            src="/lifex-logo.png" 
-            alt="LIFEX Logo" 
-            className="h-7 w-auto hover:opacity-80 transition-opacity"
-          />
-        </a>
-        
-        <div className="flex justify-center items-center">
+      <div className="px-6 py-4 border-b" style={{ backgroundColor: '#fef7e8' }}>
+        <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold text-gray-800">Agent X</h1>
+          <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
         </div>
       </div>
 
-      {/* 只在连接失败时显示错误状态 */}
-      {!apiStatus.healthy && (
-        <div className="border-b px-6 py-3 bg-red-50 border-red-200">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-red-600 text-sm font-medium">
-              ❌ Service Unavailable
-            </div>
-            <button
-              onClick={checkAPIHealth}
-              className="text-xs px-3 py-1 rounded transition-colors text-red-600 bg-white border hover:bg-gray-50"
-            >
-              Retry Connection
-            </button>
-          </div>
-          
-          <div className="text-xs text-gray-600 mb-2 font-mono">
-            Backend: {API_BASE_URL}
-          </div>
-          
-          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded text-xs">
-            <div className="font-semibold text-blue-800 mb-2">🛠️ Troubleshooting:</div>
-            <ol className="list-decimal list-inside space-y-1 text-blue-700">
-              <li>Check backend URL: <code className="bg-white px-1 rounded text-blue-800">{API_BASE_URL}</code></li>
-              <li>Render service cold start may take 30-60 seconds</li>
-              <li>Check browser network and CORS settings</li>
-              <li>Contact technical support if problem persists</li>
-            </ol>
+      {/* 连接状态 */}
+      {!isConnected && (
+        <div className="px-6 py-2 bg-yellow-50 border-b border-yellow-200">
+          <div className="text-yellow-700 text-sm">
+            ⚠️ Connecting to service... Please wait
           </div>
         </div>
       )}
 
-      {/* 聊天消息区域 */}
+      {/* 聊天区域 */}
       <div
         ref={chatRef}
         className="flex-1 overflow-y-auto px-6 py-6 space-y-4"
-        style={{ 
-          minHeight: '62vh',
-          backgroundColor: '#fef7e8'
-        }}
+        style={{ backgroundColor: '#fef7e8' }}
       >
         {messages.map((m, i) => (
           <div
@@ -523,23 +215,22 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
             className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`px-5 py-3 rounded-2xl max-w-[75%] whitespace-pre-wrap text-base leading-relaxed relative ${
+              className={`px-5 py-3 rounded-2xl max-w-[75%] whitespace-pre-wrap text-base ${
                 m.sender === 'user' 
                   ? 'bg-blue-600 text-white shadow-lg' 
                   : m.isError
-                  ? 'bg-red-50 border border-red-200 text-red-700 shadow-sm'
+                  ? 'bg-red-50 border border-red-200 text-red-700'
                   : 'bg-white border shadow-lg'
               }`}
             >
               {m.text}
-              {/* 去掉回退模式标记显示 */}
             </div>
           </div>
         ))}
         
         {isLoading && (
           <div className="flex justify-start">
-            <div className="px-5 py-3 rounded-2xl bg-white border text-base text-gray-500 shadow-lg">
+            <div className="px-5 py-3 rounded-2xl bg-white border text-gray-500 shadow-lg">
               <div className="flex items-center space-x-1">
                 <div className="animate-bounce">●</div>
                 <div className="animate-bounce delay-100">●</div>
@@ -550,36 +241,37 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         )}
       </div>
 
-      {/* 去掉快速回复按钮区域 */}
-
       {/* 输入区域 */}
-      <div className="px-6 py-4 border-t shadow-lg" style={{ maxHeight: '20vh', backgroundColor: '#fef7e8' }}>
-        <div className="relative max-w-4xl mx-auto">
+      <div className="px-6 py-4 border-t" style={{ backgroundColor: '#fef7e8' }}>
+        <div className="relative">
           <textarea
             ref={textareaRef}
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder={apiStatus.healthy ? "Tell me about your loan requirements..." : "Waiting for service connection..."}
-            className="w-full resize-none overflow-hidden rounded-xl border border-gray-300 px-5 py-4 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm disabled:bg-gray-100 disabled:text-gray-500"
-            disabled={isLoading || !apiStatus.healthy}
+            placeholder={isConnected ? "Tell me about your loan requirements..." : "Connecting..."}
+            className="w-full resize-none rounded-xl border border-gray-300 px-5 py-4 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+            disabled={isLoading || !sessionId || !isConnected}
             style={{ minHeight: '56px', maxHeight: '120px' }}
           />
           <button
             onClick={handleSend}
-            disabled={isLoading || !input.trim() || !apiStatus.healthy}
+            disabled={isLoading || !input.trim() || !sessionId || !isConnected}
             className={`absolute right-3 bottom-3 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              isLoading || !input.trim() || !apiStatus.healthy
+              isLoading || !input.trim() || !sessionId || !isConnected
                 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
           >
             {isLoading ? 'Sending...' : 'Send'}
           </button>
         </div>
         
-        {/* 去掉最下面的连接状态和功能提示 */}
+        {/* 状态信息 */}
+        <div className="mt-2 text-xs text-gray-500 text-center">
+          {isConnected ? `Connected • Session: ${sessionId.slice(-6)}` : 'Connecting to service...'}
+        </div>
       </div>
     </div>
   );
