@@ -158,17 +158,7 @@ const PromotionsShowcase = () => {
         <div className="text-center max-w-md">
           <AlertCircle className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-gray-800 mb-3">No Promotions Available</h3>
-          <p className="text-gray-600 mb-4">{error}</p>
-          
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-left">
-            <h4 className="font-medium text-blue-800 mb-2">Setup Instructions:</h4>
-            <ol className="text-sm text-blue-700 space-y-1">
-              <li>1. Create a <code className="bg-blue-200 px-1 rounded">public/promotions/</code> folder in your project</li>
-              <li>2. Add your promotional images (JPG, PNG, GIF, WebP)</li>
-              <li>3. Name them as: promotion1.jpg, promotion2.png, etc.</li>
-              <li>4. Refresh this page to see your promotions</li>
-            </ol>
-          </div>
+          <p className="text-gray-600 mb-4">Currently no promotional materials are available.</p>
           
           <button
             onClick={loadPromotions}
@@ -188,17 +178,7 @@ const PromotionsShowcase = () => {
         <div className="text-center max-w-md">
           <FileImage className="w-20 h-20 text-gray-400 mx-auto mb-6" />
           <h3 className="text-2xl font-bold text-gray-700 mb-3">No Promotional Materials</h3>
-          <p className="text-gray-500 mb-6">Add promotional images to the project folder to showcase your latest offers.</p>
-          
-          <div className="bg-gray-50 border rounded-lg p-4 text-left">
-            <h4 className="font-medium text-gray-800 mb-2">How to Add Promotions:</h4>
-            <ul className="text-sm text-gray-600 space-y-1">
-              <li>• Place images in <code className="bg-gray-200 px-1 rounded">public/promotions/</code></li>
-              <li>• Supported formats: JPG, PNG, GIF, WebP</li>
-              <li>• File names: promotion1.jpg, promotion2.png, etc.</li>
-              <li>• Images will automatically appear here</li>
-            </ul>
-          </div>
+          <p className="text-gray-500 mb-6">Check back soon for exciting offers and promotions!</p>
 
           <button
             onClick={loadPromotions}
@@ -363,14 +343,7 @@ const PromotionsShowcase = () => {
         </div>
       )}
 
-      {/* 管理提示 */}
-      <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-        <p className="text-xs text-blue-700">
-          <strong>For Administrators:</strong> To update promotional materials, add or replace image files in the 
-          <code className="bg-blue-200 px-1 rounded mx-1">public/promotions/</code> 
-          folder and click "Refresh". Supported formats: JPG, PNG, GIF, WebP.
-        </p>
-      </div>
+      {/* 管理提示 - 移除 */}
     </div>
   );
 };
