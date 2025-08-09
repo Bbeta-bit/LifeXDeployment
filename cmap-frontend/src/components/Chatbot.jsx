@@ -190,7 +190,6 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       <div className="px-6 py-4 border-b" style={{ backgroundColor: '#fef7e8' }}>
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold text-gray-800">Agent X</h1>
-          <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
         </div>
       </div>
 
@@ -270,7 +269,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         
         {/* 状态信息 */}
         <div className="mt-2 text-xs text-gray-500 text-center">
-          {isConnected ? `Connected • Session: ${sessionId.slice(-6)}` : 'Connecting to service...'}
+          Press Enter to send • Shift+Enter for new line
         </div>
       </div>
     </div>

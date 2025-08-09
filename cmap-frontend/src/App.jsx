@@ -210,9 +210,9 @@ function App() {
     console.log('App received recommendations:', newRecommendations);
     setRecommendations(newRecommendations);
     
-    // 如果收到推荐且没有打开面板，自动打开Loan Calculator面板来显示推荐
+    // 如果收到推荐且没有打开面板，自动打开Product Comparison面板来显示推荐
     if (newRecommendations && newRecommendations.length > 0 && !activePanel) {
-      setActivePanel('Loan Calculator');
+      setActivePanel('Current Product Info');
     }
   };
 
@@ -225,17 +225,15 @@ function App() {
             conversationHistory={conversationHistory}
             onFormUpdate={handleFormUpdate}
             initialData={customerInfo}
+            recommendations={recommendations}
           />
         );
       case 'Loan Calculator':
-        // 如果有推荐数据，显示Product Comparison；否则显示Calculator
-        if (recommendations && recommendations.length > 0) {
-          return <ProductComparison recommendations={recommendations} customerInfo={customerInfo} />;
-        } else {
-          return <LoanCalculator customerInfo={customerInfo} />;
-        }
+        // 贷款计算器始终显示计算器功能
+        return <LoanCalculator customerInfo={customerInfo} />;
       case 'Current Product Info':
-        return <CurrentProduct customerInfo={customerInfo} />;
+        // 产品信息显示推荐产品比较
+        return <ProductComparison recommendations={recommendations} customerInfo={customerInfo} />;
       case 'Promotions':
         return <PromotionsShowcase />; // 🔧 新的优惠活动组件
       default:

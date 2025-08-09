@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
-const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData }) => {
+const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, recommendations = [] }) => {
   const [customerInfo, setCustomerInfo] = useState({
     loan_type: '',
     asset_type: '',
@@ -318,14 +318,128 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData })
     }
   }, [conversationHistory, extractInfoFromConversation, autoExtractEnabled]);
 
-  // Handle field changes
-  const handleFieldChange = (fieldName, value) => {
-    const updatedInfo = { ...customerInfo, [fieldName]: value };
-    setCustomerInfo(updatedInfo);
+  // 🔧 下载功能
+  const downloadInformation = () => {
+    // 检查是否有信息可下载
+    const hasCustomerInfo = Object.values(customerInfo).some(value => 
+      value !== '' && value !== null && value !== undefined && !Array.isArray(value)
+    );
+    const hasRecommendations = recommendations && recommendations.length > 0;
     
-    if (onFormUpdate) {
-      onFormUpdate(updatedInfo);
+    if (!hasCustomerInfo && !hasRecommendations) {
+      alert('No information available to download. Please fill out the form or get product recommendations first.');
+      return;
     }
+
+    // 创建下载内容
+    let content = `LIFEX LOAN INFORMATION SUMMARY\n`;
+    content += `Generated: ${new Date().toLocaleString()}\n`;
+    content += `${'='.repeat(50)}\n\n`;
+
+    // 客户信息部分
+    if (hasCustomerInfo) {
+      content += `CUSTOMER INFORMATION:\n`;
+      content += `${'-'.repeat(25)}\n`;
+      
+      const sections = {
+        'Basic Details': ['loan_type', 'asset_type', 'property_status'],
+        'Financial Information': ['credit_score', 'desired_loan_amount'],
+        'Business Information': ['ABN_years', 'GST_years', 'business_structure'],
+        'Vehicle Information': ['vehicle_type', 'vehicle_condition', 'vehicle_make', 'vehicle_model', 'vehicle_year'],
+        'Preferences': ['interest_rate_ceiling', 'monthly_budget', 'loan_term_preference']
+      };
+
+      Object.entries(sections).forEach(([sectionName, fields]) => {
+        const sectionData = fields.filter(field => {
+          const config = fieldConfig[field];
+          const hasValue = customerInfo[field];
+          const isVisible = !config?.conditional || config.conditional(customerInfo);
+          return hasValue && isVisible;
+        });
+
+        if (sectionData.length > 0) {
+          content += `\n${sectionName}:\n`;
+          sectionData.forEach(field => {
+            const config = fieldConfig[field];
+            const value = customerInfo[field];
+            const displayValue = config?.type === 'select' 
+              ? config.options?.find(opt => opt.value === value)?.label || value
+              : value;
+            content += `  • ${config?.label || field}: ${displayValue}\n`;
+          });
+        }
+      });
+
+      // 自动提取的字段
+      if (customerInfo.extracted_fields.length > 0) {
+        content += `\nAuto-extracted Fields: ${customerInfo.extracted_fields.length}\n`;
+        content += `Last Updated: ${customerInfo.last_updated ? new Date(customerInfo.last_updated).toLocaleString() : 'N/A'}\n`;
+      }
+    }
+
+    // 推荐产品部分
+    if (hasRecommendations) {
+      content += `\n\nPRODUCT RECOMMENDATIONS:\n`;
+      content += `${'-'.repeat(25)}\n`;
+      
+      recommendations.forEach((rec, index) => {
+        content += `\n${index + 1}. ${rec.lender_name} - ${rec.product_name}\n`;
+        content += `   Interest Rate: ${rec.base_rate}% p.a.\n`;
+        if (rec.comparison_rate) {
+          content += `   Comparison Rate: ${rec.comparison_rate}% p.a.\n`;
+        }
+        if (rec.monthly_payment) {
+          content += `   Monthly Payment: ${rec.monthly_payment}\n`;
+        }
+        content += `   Max Loan Amount: ${rec.max_loan_amount}\n`;
+        content += `   Loan Terms: ${rec.loan_term_options}\n`;
+        content += `   Documentation: ${rec.documentation_type}\n`;
+        content += `   Requirements Met: ${rec.requirements_met ? 'Yes' : 'No'}\n`;
+
+        // 详细要求
+        if (rec.detailed_requirements) {
+          content += `   \n   Eligibility Requirements:\n`;
+          Object.entries(rec.detailed_requirements).forEach(([key, value]) => {
+            content += `     • ${key.replace(/_/g, ' ')}: ${value}\n`;
+          });
+        }
+
+        // 费用
+        if (rec.fees_breakdown) {
+          content += `   \n   Fees:\n`;
+          Object.entries(rec.fees_breakdown).forEach(([key, value]) => {
+            content += `     • ${key.replace(/_/g, ' ')}: ${value}\n`;
+          });
+        }
+
+        // 文档要求
+        if (rec.documentation_requirements && rec.documentation_requirements.length > 0) {
+          content += `   \n   Documentation Required:\n`;
+          rec.documentation_requirements.forEach(doc => {
+            content += `     • ${doc}\n`;
+          });
+        }
+        
+        content += `\n`;
+      });
+    }
+
+    // 免责声明
+    content += `\n${'='.repeat(50)}\n`;
+    content += `DISCLAIMER:\n`;
+    content += `This summary is for informational purposes only. Interest rates, terms, and conditions are subject to change and final approval by the lender. All calculations are estimates and actual payments may vary. Please consult with a financial advisor for personalized advice.\n`;
+    content += `\nGenerated by LIFEX Loan Agent System\n`;
+
+    // 创建并下载文件
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `LIFEX_Loan_Summary_${new Date().toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // Clear form
@@ -361,6 +475,16 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData })
     
     if (onFormUpdate) {
       onFormUpdate(clearedInfo);
+    }
+  };
+
+  // Handle field changes
+  const handleFieldChange = (fieldName, value) => {
+    const updatedInfo = { ...customerInfo, [fieldName]: value };
+    setCustomerInfo(updatedInfo);
+    
+    if (onFormUpdate) {
+      onFormUpdate(updatedInfo);
     }
   };
 
@@ -466,6 +590,22 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData })
               className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
             >
               Clear
+            </button>
+            <button
+              onClick={downloadInformation}
+              disabled={!Object.values(customerInfo).some(value => 
+                value !== '' && value !== null && value !== undefined && !Array.isArray(value)
+              ) && (!recommendations || recommendations.length === 0)}
+              className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                (!Object.values(customerInfo).some(value => 
+                  value !== '' && value !== null && value !== undefined && !Array.isArray(value)
+                ) && (!recommendations || recommendations.length === 0))
+                ? 'No information available to download'
+                : 'Download PDF Summary'
+              }
+            >
+              Download PDF
             </button>
           </div>
         </div>
