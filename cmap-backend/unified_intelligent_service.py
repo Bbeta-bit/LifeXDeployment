@@ -244,8 +244,8 @@ BFS (BRANDED FINANCIAL):
         return structured_info
 
     async def process_conversation(self, user_message: str, session_id: str = "default", 
-                                 chat_history: List[Dict] = None) -> Dict[str, Any]:
-        """处理对话的主入口函数"""
+                                 chat_history: List[Dict] = None, current_customer_info: Dict = None) -> Dict[str, Any]:
+        """🔧 处理对话的主入口函数 - 添加current_customer_info参数"""
         
         # 获取或创建会话状态
         if session_id not in self.conversation_states:
@@ -254,11 +254,17 @@ BFS (BRANDED FINANCIAL):
                 "customer_profile": CustomerProfile(),
                 "conversation_history": [],
                 "asked_fields": set(),
-                "round_count": 0
+                "round_count": 0,
+                "last_recommendations": []
             }
         
         state = self.conversation_states[session_id]
         state["round_count"] += 1
+        
+        # 🔧 同步最新的客户信息（来自DynamicForm的手动修改）
+        if current_customer_info:
+            self._sync_customer_info_from_form(state["customer_profile"], current_customer_info)
+            print(f"🔄 Synced customer info from form: {current_customer_info}")
         
         # 重要：使用完整的聊天历史，而不是覆盖
         if chat_history:
@@ -272,8 +278,8 @@ BFS (BRANDED FINANCIAL):
         extracted_info = await self._extract_mvp_and_preferences(state["conversation_history"])
         print(f"🔍 Extracted info: {extracted_info}")  # 调试信息
         
-        # 更新客户档案 - 保留已有信息
-        self._update_customer_profile_preserve(state["customer_profile"], extracted_info)
+        # 🔧 使用新的优先级更新策略：自动提取 > 手动修改
+        self._update_customer_profile_with_priority(state["customer_profile"], extracted_info, current_customer_info)
         print(f"📊 Updated profile: {self._serialize_customer_profile(state['customer_profile'])}")  # 调试信息
         
         # 检查已经有值的字段，自动标记为已问过
@@ -283,15 +289,21 @@ BFS (BRANDED FINANCIAL):
                 state["asked_fields"].add(field)
                 print(f"✅ Auto-marked {field} as asked")
         
-        # 检查用户是否要求最低利率或推荐
+        # 🔧 检查是否是调整要求
         user_message_lower = user_message.lower()
+        is_adjustment_request = any(phrase in user_message_lower for phrase in [
+            "adjust", "change", "modify", "different", "lower rate", "higher amount", 
+            "longer term", "shorter term", "better option", "other option"
+        ])
+        
+        # 检查用户是否要求最低利率或推荐
         wants_lowest_rate = any(phrase in user_message_lower for phrase in [
             "lowest interest rate", "lowest rate", "best rate", "cheapest rate",
             "show me options", "see recommendations", "recommend products", "show options"
         ])
         
         # 确定对话阶段
-        new_stage = self._determine_conversation_stage(state, wants_lowest_rate)
+        new_stage = self._determine_conversation_stage(state, wants_lowest_rate or is_adjustment_request)
         print(f"🎯 Current stage: {new_stage}")  # 调试信息
         print(f"📝 Asked fields: {state['asked_fields']}")  # 调试信息
         state["stage"] = new_stage
@@ -302,9 +314,9 @@ BFS (BRANDED FINANCIAL):
         elif new_stage == ConversationStage.PREFERENCE_COLLECTION:
             response = await self._handle_preference_collection(state, wants_lowest_rate)
         elif new_stage == ConversationStage.PRODUCT_MATCHING:
-            response = await self._handle_product_matching(state)
+            response = await self._handle_product_matching(state, is_adjustment_request)
         elif new_stage == ConversationStage.RECOMMENDATION:
-            response = await self._handle_recommendation(state)
+            response = await self._handle_recommendation(state, is_adjustment_request)
         else:
             response = await self._handle_general_conversation(state)
         
@@ -322,21 +334,77 @@ BFS (BRANDED FINANCIAL):
             "status": "success"
         }
 
+    def _sync_customer_info_from_form(self, profile: CustomerProfile, form_info: Dict):
+        """🔧 从表单同步客户信息到profile"""
+        for field, value in form_info.items():
+            if hasattr(profile, field) and value is not None and value != '':
+                setattr(profile, field, value)
+                print(f"🔄 Synced from form: {field} = {value}")
+
+    def _update_customer_profile_with_priority(self, profile: CustomerProfile, extracted_info: Dict[str, Any], manual_info: Dict = None):
+        """🔧 使用优先级策略更新客户档案：自动提取 > 手动修改，最新信息 > 历史信息"""
+        
+        # 1. 先应用手动修改（较低优先级）
+        if manual_info:
+            for field, value in manual_info.items():
+                if value is not None and value != '' and hasattr(profile, field):
+                    current_value = getattr(profile, field)
+                    if current_value != value:  # 只有值不同时才更新
+                        setattr(profile, field, value)
+                        print(f"📝 Manual update: {field} = {value}")
+        
+        # 2. 再应用自动提取（更高优先级，会覆盖手动修改）
+        for field, value in extracted_info.items():
+            if value is not None and hasattr(profile, field):
+                current_value = getattr(profile, field)
+                # 自动提取的信息总是应用（最新信息优先）
+                setattr(profile, field, value)
+                if current_value != value:
+                    print(f"🤖 Auto-extracted (priority): {field} = {value} (was: {current_value})")
+
     async def _extract_mvp_and_preferences(self, conversation_history: List[Dict]) -> Dict[str, Any]:
         """使用Claude提取MVP信息和偏好，带fallback机制"""
         try:
             # 检查API密钥
             if not self.anthropic_api_key:
                 print("⚠️ No Anthropic API key - using rule-based extraction")
-                return self._rule_based_extraction(conversation_history)
+                return self._enhanced_rule_based_extraction(conversation_history)
             
             conversation_text = "\n".join([
                 f"{msg['role']}: {msg['content']}" for msg in conversation_history[-6:]  # 最近6轮对话
             ])
             
-            system_prompt = """Extract customer loan information from the conversation. Return ONLY valid JSON.
+            # 🔧 修复后的Prompt - 重点提高语义理解和否定语句处理
+            system_prompt = """你是专业的客户信息提取助手。从对话中灵活提取客户贷款信息，重点理解语义而非严格匹配格式。
 
-Required JSON structure:
+核心提取规则：
+1. **否定语句处理**：
+   - "no ABN" / "don't have ABN" / "no abn and gst years" → ABN_years: 0
+   - "no GST" / "not registered for GST" → GST_years: 0
+   - "no property" / "don't own property" → property_status: "non_property_owner"
+
+2. **灵活数值识别**：
+   - "credit score 600" / "600 credit" / "score is 600" → credit_score: 600
+   - "$20000" / "20000" / "20k" / "twenty thousand" → desired_loan_amount: 20000
+   - "2 years ABN" / "ABN for 2 years" → ABN_years: 2
+
+3. **业务术语理解**：
+   - "sole trader" / "self employed" → business_structure: "sole_trader"
+   - "company" / "pty ltd" → business_structure: "company"
+   - "commercial loan" / "business use" → loan_type: "commercial"
+   - "personal loan" / "personal use" → loan_type: "consumer"
+
+4. **调整要求识别**：
+   - "lower rate" / "better rate" → interest_rate_ceiling: (current_rate - 1)
+   - "higher amount" / "more money" → 提取新的loan amount
+   - "longer term" / "shorter term" → 提取新的loan term
+
+5. **语义理解**：
+   - 理解上下文关系，不仅匹配关键词
+   - 处理用户的完整回答，提取所有相关信息
+   - 识别隐含信息和业务逻辑
+
+返回有效JSON格式：
 {
     "loan_type": "consumer" or "commercial" or null,
     "asset_type": "primary" or "secondary" or "tertiary" or "motor_vehicle" or null,
@@ -354,15 +422,10 @@ Required JSON structure:
     "vehicle_make": string or null,
     "vehicle_model": string or null,
     "vehicle_year": number or null,
-    "purchase_price": number or null,
-    "deposit_amount": number or null
+    "purchase_price": number or null
 }
 
-Extraction rules:
-- loan_type: "commercial" if business/company mentioned, "consumer" if personal
-- asset_type: "motor_vehicle" for cars/trucks/vans, "primary" for main equipment
-- property_status: "property_owner" if they own property, "non_property_owner" if not
-- Only extract explicitly mentioned information"""
+重要：只提取明确提到的信息，不确定的字段设为null。优先理解语义，灵活处理各种表达方式。"""
 
             headers = {
                 "x-api-key": self.anthropic_api_key,
@@ -376,7 +439,7 @@ Extraction rules:
                 "temperature": 0.1,
                 "system": system_prompt,
                 "messages": [
-                    {"role": "user", "content": f"Extract from:\n{conversation_text}"}
+                    {"role": "user", "content": f"从以下对话中提取客户信息:\n{conversation_text}"}
                 ]
             }
 
@@ -400,73 +463,125 @@ Extraction rules:
                     
                 else:
                     print(f"❌ Anthropic API error: {response.status_code} - {response.text}")
-                    return self._rule_based_extraction(conversation_history)
+                    return self._enhanced_rule_based_extraction(conversation_history)
                     
         except httpx.TimeoutException:
             print("⏰ Anthropic API timeout - falling back to rule-based extraction")
-            return self._rule_based_extraction(conversation_history)
+            return self._enhanced_rule_based_extraction(conversation_history)
             
         except Exception as e:
             print(f"❌ Claude extraction failed: {e}")
-            return self._rule_based_extraction(conversation_history)
+            return self._enhanced_rule_based_extraction(conversation_history)
 
-    def _rule_based_extraction(self, conversation_history: List[Dict]) -> Dict[str, Any]:
-        """规则后备提取方法"""
+    def _enhanced_rule_based_extraction(self, conversation_history: List[Dict]) -> Dict[str, Any]:
+        """🔧 修复和增强的规则后备提取方法"""
         conversation_text = " ".join([msg.get("content", "") for msg in conversation_history]).lower()
         
         extracted = {}
         
-        # 贷款类型
+        # 🔧 1. 增强否定语句处理
+        negative_abn_patterns = [
+            r"no\s+abn", r"don't\s+have\s+abn", r"without\s+abn", 
+            r"no\s+abn\s+and\s+gst", r"no\s+abn.*gst"
+        ]
+        negative_gst_patterns = [
+            r"no\s+gst", r"don't\s+have\s+gst", r"not\s+registered\s+for\s+gst",
+            r"no\s+abn\s+and\s+gst", r"no.*gst.*years"
+        ]
+        
+        for pattern in negative_abn_patterns:
+            if re.search(pattern, conversation_text):
+                extracted["ABN_years"] = 0
+                break
+                
+        for pattern in negative_gst_patterns:
+            if re.search(pattern, conversation_text):
+                extracted["GST_years"] = 0
+                break
+        
+        # 🔧 2. 增强业务结构识别
+        business_structure_patterns = {
+            "sole_trader": [r"sole\s*trader", r"self\s*employed", r"individual\s*business"],
+            "company": [r"company", r"corporation", r"pty\s*ltd", r"limited"],
+            "trust": [r"trust", r"family\s*trust", r"discretionary\s*trust"],
+            "partnership": [r"partnership", r"partners", r"joint\s*business"]
+        }
+        
+        for structure, patterns in business_structure_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, conversation_text):
+                    extracted["business_structure"] = structure
+                    break
+            if "business_structure" in extracted:
+                break
+        
+        # 🔧 3. 增强贷款类型识别
         if any(word in conversation_text for word in ["business", "company", "commercial"]):
             extracted["loan_type"] = "commercial"
         elif any(word in conversation_text for word in ["personal", "consumer", "private"]):
             extracted["loan_type"] = "consumer"
         
-        # 资产类型
+        # 🔧 4. 增强资产类型识别
         if any(word in conversation_text for word in ["car", "vehicle", "truck", "van", "motorcycle"]):
             extracted["asset_type"] = "motor_vehicle"
         elif any(word in conversation_text for word in ["equipment", "machinery", "primary"]):
             extracted["asset_type"] = "primary"
         
-        # 房产状态
-        if any(phrase in conversation_text for phrase in ["own property", "property owner", "have property", "property backed"]):
-            extracted["property_status"] = "property_owner"
-        elif any(phrase in conversation_text for phrase in ["no property", "don't own", "rent"]):
-            extracted["property_status"] = "non_property_owner"
+        # 🔧 5. 增强房产状态识别
+        property_owner_patterns = [
+            r"own\s+property", r"property\s+owner", r"have\s+property", 
+            r"property\s+backed", r"own\s+a\s+house"
+        ]
+        property_non_owner_patterns = [
+            r"no\s+property", r"don't\s+own", r"rent", r"renting",
+            r"non.property", r"without\s+property"
+        ]
         
-        # ABN年数
+        for pattern in property_owner_patterns:
+            if re.search(pattern, conversation_text):
+                extracted["property_status"] = "property_owner"
+                break
+        
+        if "property_status" not in extracted:
+            for pattern in property_non_owner_patterns:
+                if re.search(pattern, conversation_text):
+                    extracted["property_status"] = "non_property_owner"
+                    break
+        
+        # 🔧 6. 增强数值提取
+        # ABN年数 - 增强模式
         abn_patterns = [
-            r"(\d+)\s*years?\s*abn",
-            r"abn.*?(\d+)\s*years?",
-            r"(\d+)\s*years?.*?abn"
+            r"(\d+)\s*years?\s*abn", r"abn.*?(\d+)\s*years?", 
+            r"(\d+)\s*years?.*?abn", r"abn\s*for\s*(\d+)\s*years?"
         ]
         for pattern in abn_patterns:
             match = re.search(pattern, conversation_text)
-            if match:
+            if match and "ABN_years" not in extracted:  # 不覆盖否定语句的结果
                 years = int(match.group(1))
                 if 0 <= years <= 50:
                     extracted["ABN_years"] = years
                 break
         
-        # GST年数
+        # GST年数 - 增强模式
         gst_patterns = [
-            r"(\d+)\s*years?\s*gst",
-            r"gst.*?(\d+)\s*years?",
-            r"(\d+)\s*years?.*?gst"
+            r"(\d+)\s*years?\s*gst", r"gst.*?(\d+)\s*years?",
+            r"(\d+)\s*years?.*?gst", r"gst\s*for\s*(\d+)\s*years?"
         ]
         for pattern in gst_patterns:
             match = re.search(pattern, conversation_text)
-            if match:
+            if match and "GST_years" not in extracted:  # 不覆盖否定语句的结果
                 years = int(match.group(1))
                 if 0 <= years <= 50:
                     extracted["GST_years"] = years
                 break
         
-        # 信用分数
+        # 🔧 7. 增强信用分数提取
         credit_patterns = [
-            r"credit.{0,20}?(\d{3,4})",
-            r"score.{0,20}?(\d{3,4})",
-            r"(\d{3,4}).{0,20}?credit"
+            r"credit\s*score\s*(?:is\s*)?(\d{3,4})",
+            r"score\s*(?:is\s*)?(\d{3,4})",
+            r"(\d{3,4})\s*credit",
+            r"my\s*score\s*(?:is\s*)?(\d{3,4})",
+            r"(\d{3,4})\s*score"
         ]
         for pattern in credit_patterns:
             match = re.search(pattern, conversation_text)
@@ -490,38 +605,34 @@ Extraction rules:
         elif any(word in conversation_text for word in ["van", "ute"]):
             extracted["vehicle_type"] = "van_ute"
         
-        # 贷款金额
+        # 🔧 8. 增强贷款金额提取
         amount_patterns = [
-            r"[\$]?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)",
-            r"(\d+)k",
+            r"loan\s*amount.*?(\d+(?:,\d{3})*(?:\.\d{2})?)",
+            r"borrow.*?(\d+(?:,\d{3})*)",
+            r"need.*?(\d+(?:,\d{3})*)",
+            r"want.*?(\d+(?:,\d{3})*)",
+            r"looking\s*for.*?(\d+(?:,\d{3})*)",
+            r"[\$]\s*(\d+(?:,\d{3})*(?:\.\d{2})?)",
+            r"(\d+)k\s*(?:loan|dollar)",
             r"(\d+)\s*thousand"
         ]
         for pattern in amount_patterns:
             match = re.search(pattern, conversation_text)
             if match:
-                amount_str = match.group(1).replace(',', '')
-                if 'k' in match.group(0) or 'thousand' in match.group(0):
-                    amount = float(amount_str) * 1000
-                else:
-                    amount = float(amount_str)
-                if 1000 <= amount <= 10000000:
-                    extracted["desired_loan_amount"] = amount
-                break
+                try:
+                    amount_str = match.group(1).replace(',', '')
+                    if 'k' in match.group(0) or 'thousand' in match.group(0):
+                        amount = float(amount_str) * 1000
+                    else:
+                        amount = float(amount_str)
+                    if 1000 <= amount <= 10000000:
+                        extracted["desired_loan_amount"] = amount
+                    break
+                except (ValueError, IndexError):
+                    continue
         
-        print(f"🔍 Rule-based extraction result: {extracted}")  # 调试信息
+        print(f"🔍 Enhanced rule-based extraction result: {extracted}")  # 调试信息
         return extracted
-
-    def _update_customer_profile_preserve(self, profile: CustomerProfile, extracted_info: Dict[str, Any]):
-        """更新客户档案，保留已有信息"""
-        for field, value in extracted_info.items():
-            if value is not None and hasattr(profile, field):
-                # 只有当前值为None时才更新，保留已有信息
-                current_value = getattr(profile, field)
-                if current_value is None:
-                    setattr(profile, field, value)
-                    print(f"🆕 Set {field} = {value}")
-                else:
-                    print(f"🔒 Kept existing {field} = {current_value} (ignored new: {value})")
 
     def _determine_conversation_stage(self, state: Dict, wants_lowest_rate: bool = False) -> ConversationStage:
         """确定对话阶段 - MVP是必问问题，4轮后强制推荐"""
@@ -570,11 +681,17 @@ Extraction rules:
         # 获取当前需要问的MVP字段
         required_mvp_fields = self._get_required_mvp_fields(profile)
         
-        # 检查已经有值的字段，自动标记为已问过
+        # 🔧 增强记忆功能：检查最近对话是否已经回答了问题
+        recent_context = " ".join([msg.get("content", "") for msg in state["conversation_history"][-4:]]).lower()
+        
         for field in required_mvp_fields:
-            if getattr(profile, field) is not None:
+            field_value = getattr(profile, field)
+            if field_value is not None:
                 asked_fields.add(field)
-                print(f"✅ Auto-marked {field} as asked (has value: {getattr(profile, field)})")
+                print(f"✅ Auto-marked {field} as asked (has value: {field_value})")
+            elif self._was_field_discussed_recently(field, recent_context):
+                asked_fields.add(field)
+                print(f"🧠 Auto-marked {field} as asked (recently discussed)")
         
         # 找出还没问过的字段
         unasked_fields = [field for field in required_mvp_fields if field not in asked_fields]
@@ -656,6 +773,23 @@ Extraction rules:
             "next_questions": questions
         }
 
+    def _was_field_discussed_recently(self, field_name: str, recent_context: str) -> bool:
+        """🔧 增强记忆功能：检查字段是否在最近对话中被讨论过"""
+        field_keywords = {
+            "ABN_years": ["abn", "business number", "australian business number"],
+            "GST_years": ["gst", "goods and services tax", "tax registration"],
+            "credit_score": ["credit", "score", "rating"],
+            "property_status": ["property", "own", "house", "home"],
+            "loan_type": ["business", "commercial", "personal", "consumer"],
+            "asset_type": ["vehicle", "car", "equipment", "machinery"],
+            "vehicle_type": ["passenger", "truck", "van", "motorcycle"],
+            "vehicle_condition": ["new", "used", "demonstrator"],
+            "business_structure": ["sole trader", "company", "trust", "partnership"]
+        }
+        
+        keywords = field_keywords.get(field_name, [field_name.replace("_", " ")])
+        return any(keyword in recent_context for keyword in keywords)
+
     def _generate_field_question(self, field: str, profile: CustomerProfile) -> str:
         """为特定字段生成问题"""
         questions = {
@@ -672,8 +806,8 @@ Extraction rules:
         }
         return questions.get(field, f"Please provide your {field}")
 
-    async def _handle_product_matching(self, state: Dict) -> Dict[str, Any]:
-        """处理产品匹配阶段 - 直接进行匹配"""
+    async def _handle_product_matching(self, state: Dict, is_adjustment: bool = False) -> Dict[str, Any]:
+        """🔧 处理产品匹配阶段 - 添加调整支持"""
         print("🎯 Starting product matching...")
         profile = state["customer_profile"]
         
@@ -689,11 +823,39 @@ Extraction rules:
         
         print(f"✅ Found {len(recommendations)} recommendations")
         
+        # 🔧 管理推荐历史：保留最新2个
+        if "last_recommendations" not in state:
+            state["last_recommendations"] = []
+        
+        # 添加时间戳和状态标记
+        for rec in recommendations:
+            rec["timestamp"] = state["round_count"]
+            rec["recommendation_status"] = "current"
+        
+        # 更新推荐历史
+        all_recommendations = recommendations + state["last_recommendations"]
+        
+        # 去重并保留最新2个
+        unique_recommendations = []
+        seen = set()
+        for rec in all_recommendations:
+            key = f"{rec['lender_name']}_{rec['product_name']}"
+            if key not in seen:
+                unique_recommendations.append(rec)
+                seen.add(key)
+        
+        # 只保留最新2个，并正确标记
+        state["last_recommendations"] = unique_recommendations[:2]
+        if len(state["last_recommendations"]) > 1:
+            state["last_recommendations"][0]["recommendation_status"] = "current"
+            state["last_recommendations"][1]["recommendation_status"] = "previous"
+        elif len(state["last_recommendations"]) == 1:
+            state["last_recommendations"][0]["recommendation_status"] = "current"
+        
         # 更新状态为推荐阶段
         state["stage"] = ConversationStage.RECOMMENDATION
-        state["last_recommendations"] = recommendations
         
-        return await self._handle_recommendation(state)
+        return await self._handle_recommendation(state, is_adjustment)
 
     async def _handle_preference_collection(self, state: Dict, wants_lowest_rate: bool = False) -> Dict[str, Any]:
         """处理偏好收集阶段"""
@@ -746,8 +908,8 @@ Extraction rules:
             asked_fields.add("preferences_completed")
             return await self._handle_product_matching(state)
 
-    async def _handle_recommendation(self, state: Dict) -> Dict[str, Any]:
-        """处理推荐阶段 - 确保只推荐一个最佳产品"""
+    async def _handle_recommendation(self, state: Dict, is_adjustment: bool = False) -> Dict[str, Any]:
+        """🔧 处理推荐阶段 - 修复推荐后的提示语，添加调整支持"""
         recommendations = state.get("last_recommendations", [])
         
         if not recommendations:
@@ -756,15 +918,71 @@ Extraction rules:
                 "recommendations": []
             }
         
-        # 确保只有一个推荐
-        best_recommendation = recommendations[0] if isinstance(recommendations, list) else recommendations
-        
-        message = self._format_comprehensive_recommendation_message(best_recommendation, state["customer_profile"])
+        # 格式化推荐消息
+        message = self._format_recommendation_with_comparison_guide(recommendations, state["customer_profile"], is_adjustment)
         
         return {
             "message": message,
-            "recommendations": [best_recommendation]  # 只返回一个推荐
+            "recommendations": recommendations
         }
+
+    def _format_recommendation_with_comparison_guide(self, recommendations: List[Dict], profile: CustomerProfile, is_adjustment: bool = False) -> str:
+        """🔧 格式化推荐消息，包含ProductComparison交互指导"""
+        
+        # 获取当前推荐
+        current_rec = None
+        for rec in recommendations:
+            if rec.get("recommendation_status") == "current":
+                current_rec = rec
+                break
+        
+        if not current_rec:
+            current_rec = recommendations[0] if recommendations else None
+        
+        if not current_rec:
+            return "I'm finding the best options for you. Please provide a bit more information."
+        
+        # 基础推荐信息
+        lender = current_rec.get("lender_name", "Unknown")
+        product = current_rec.get("product_name", "Unknown Product")
+        base_rate = current_rec.get("base_rate", 0)
+        comparison_rate = current_rec.get("comparison_rate", 0)
+        monthly_payment = current_rec.get("monthly_payment", 0)
+        
+        if is_adjustment:
+            message = f"Perfect! I've found an updated option based on your requirements:\n\n"
+        else:
+            message = f"Great news! I've found an excellent loan option for you:\n\n"
+        
+        message += f"**{lender} - {product}**\n"
+        message += f"• Interest Rate: {base_rate}% p.a.\n"
+        if comparison_rate:
+            message += f"• Comparison Rate: {comparison_rate}% p.a.*\n"
+        if monthly_payment:
+            loan_amount = profile.desired_loan_amount or 50000
+            message += f"• Monthly Payment: ${monthly_payment:,.2f}** (${loan_amount:,.0f} over 60 months)\n"
+        if current_rec.get("max_loan_amount"):
+            message += f"• Maximum Loan: {current_rec['max_loan_amount']}\n"
+        
+        # 🔧 ProductComparison交互指导
+        message += f"\n**📋 What's Next:**\n"
+        message += f"Your personalized recommendation is now displayed in the **Product Comparison panel** on the left. "
+        message += f"Please review the complete details and let me know:\n\n"
+        message += f"• Does this meet all your requirements?\n"
+        message += f"• Would you like a **lower interest rate**, **different loan term**, or **adjusted monthly payment**?\n"
+        message += f"• Any other specific conditions you'd like me to optimize for?\n\n"
+        
+        if is_adjustment:
+            # 🔧 调整后的确认提示
+            message += f"Is there anything else you'd like me to adjust or optimize for?"
+        else:
+            message += f"Just tell me what you'd like to adjust, and I'll find better options tailored to your needs!"
+        
+        # 免责声明
+        message += f"\n\n*Comparison rate includes fees and charges"
+        message += f"\n**Monthly payment estimate - actual may vary based on final terms"
+        
+        return message
 
     async def _ai_product_matching(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
         """增强的产品匹配方法 - 包含完整产品信息"""
@@ -794,7 +1012,7 @@ Customer Profile:
             # 获取结构化产品信息
             condensed_products = self._get_structured_product_info()
 
-            # 增强的系统提示 - 要求完整产品信息，去除推荐理由
+            # 增强的系统提示 - 要求完整产品信息
             system_prompt = f"""Find the best loan product match for this customer.
 
 CUSTOMER PROFILE:
@@ -846,8 +1064,7 @@ Return ONLY a JSON object with COMPLETE information:
 IMPORTANT: 
 - comparison_rate = base_rate + fees impact (typically +0.2% to +0.5%)
 - monthly_payment calculated for ${profile.desired_loan_amount or 50000} over 60 months
-- Include ALL eligibility requirements, fees, and conditions
-- DO NOT include why_recommended field"""
+- Include ALL eligibility requirements, fees, and conditions"""
 
             headers = {
                 "x-api-key": self.anthropic_api_key,
@@ -857,7 +1074,7 @@ IMPORTANT:
 
             payload = {
                 "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 1500,  # 增加token限制以容纳完整信息
+                "max_tokens": 1500,
                 "temperature": 0.1,
                 "system": system_prompt,
                 "messages": [
@@ -1136,71 +1353,6 @@ IMPORTANT:
                 ]
             }
 
-    def _format_comprehensive_recommendation_message(self, recommendation: Dict[str, Any], profile: CustomerProfile) -> str:
-        """格式化完整推荐消息 - 去除推荐理由，包含所有信息"""
-        try:
-            lender = recommendation.get("lender_name", "Unknown")
-            product = recommendation.get("product_name", "Unknown Product")
-            base_rate = recommendation.get("base_rate", 0)
-            comparison_rate = recommendation.get("comparison_rate", 0)
-            monthly_payment = recommendation.get("monthly_payment", 0)
-            
-            message = f"**{lender} - {product}**\n\n"
-            
-            # 核心贷款信息
-            message += f"**💰 LOAN DETAILS:**\n"
-            message += f"• Interest Rate: {base_rate}% p.a.\n"
-            if comparison_rate:
-                message += f"• Comparison Rate: {comparison_rate}% p.a.*\n"
-            if monthly_payment:
-                loan_amount = profile.desired_loan_amount or 50000
-                message += f"• Monthly Payment: ${monthly_payment:,.2f}** (${loan_amount:,.0f} over 60 months)\n"
-            if recommendation.get("max_loan_amount"):
-                message += f"• Maximum Loan: {recommendation['max_loan_amount']}\n"
-            if recommendation.get("loan_term_options"):
-                message += f"• Loan Terms: {recommendation['loan_term_options']}\n"
-            
-            # 详细要求
-            detailed_req = recommendation.get("detailed_requirements", {})
-            if detailed_req:
-                message += f"\n**📋 ELIGIBILITY REQUIREMENTS:**\n"
-                for req_key, req_value in detailed_req.items():
-                    readable_key = req_key.replace("_", " ").title()
-                    message += f"• {readable_key}: {req_value}\n"
-            
-            # 费用明细
-            fees = recommendation.get("fees_breakdown", {})
-            if fees:
-                message += f"\n**💳 FEES:**\n"
-                for fee_key, fee_value in fees.items():
-                    readable_key = fee_key.replace("_", " ").title()
-                    message += f"• {readable_key}: {fee_value}\n"
-            
-            # 利率条件
-            rate_conditions = recommendation.get("rate_conditions", {})
-            if rate_conditions:
-                message += f"\n**📊 RATE CONDITIONS:**\n"
-                for rate_key, rate_value in rate_conditions.items():
-                    readable_key = rate_key.replace("_", " ").title()
-                    message += f"• {readable_key}: {rate_value}\n"
-            
-            # 文档要求
-            doc_requirements = recommendation.get("documentation_requirements", [])
-            if doc_requirements:
-                message += f"\n**📄 DOCUMENTATION REQUIRED:**\n"
-                for doc in doc_requirements:
-                    message += f"• {doc}\n"
-            
-            # 免责声明
-            message += f"\n*Comparison rate includes fees and charges"
-            message += f"\n**Monthly payment estimate - actual may vary based on final terms"
-            
-            return message
-            
-        except Exception as e:
-            print(f"Error formatting comprehensive recommendation: {e}")
-            return "I found a suitable loan product for you. Please contact us for more details."
-
     def _serialize_customer_profile(self, profile: CustomerProfile) -> Dict[str, Any]:
         """序列化客户档案为字典"""
         return {
@@ -1216,7 +1368,8 @@ IMPORTANT:
             "vehicle_make": profile.vehicle_make,
             "vehicle_model": profile.vehicle_model,
             "interest_rate_ceiling": profile.interest_rate_ceiling,
-            "monthly_budget": profile.monthly_budget
+            "monthly_budget": profile.monthly_budget,
+            "business_structure": profile.business_structure
         }
 
     async def _handle_general_conversation(self, state: Dict) -> Dict[str, Any]:

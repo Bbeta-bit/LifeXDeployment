@@ -48,18 +48,35 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     }
   };
 
-  // 发送消息
-  const sendMessage = async (message, sessionId, chatHistory = []) => {
+  // 🔧 修改发送消息函数，添加customerInfo支持
+  const sendMessage = async (message, sessionId, chatHistory = [], currentCustomerInfo = null) => {
+    const payload = {
+      message: message,
+      session_id: sessionId,
+      history: chatHistory
+    };
+
+    // 🔧 添加当前客户信息到请求中
+    if (currentCustomerInfo && Object.keys(currentCustomerInfo).length > 0) {
+      // 过滤掉空值和undefined值
+      const cleanedCustomerInfo = Object.fromEntries(
+        Object.entries(currentCustomerInfo).filter(([key, value]) => 
+          value !== null && value !== undefined && value !== ''
+        )
+      );
+      
+      if (Object.keys(cleanedCustomerInfo).length > 0) {
+        payload.current_customer_info = cleanedCustomerInfo;
+        console.log('🔄 Sending customer info to backend:', cleanedCustomerInfo);
+      }
+    }
+
     const response = await fetch(`${API_BASE_URL}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        message: message,
-        session_id: sessionId,
-        history: chatHistory
-      }),
+      body: JSON.stringify(payload),
       mode: 'cors',
     });
 
@@ -70,7 +87,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     return await response.json();
   };
 
-  // 处理发送
+  // 🔧 修改处理发送函数，使用最新的customerInfo
   const handleSend = async () => {
     if (!input.trim() || isLoading || !sessionId) return;
 
@@ -106,14 +123,16 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         }
       ];
       
-      // 发送到后端
-      const apiResponse = await sendMessage(currentInput, sessionId, fullChatHistory);
+      // 🔧 发送到后端时包含最新的customerInfo
+      console.log('📤 Sending with customerInfo:', customerInfo);
+      const apiResponse = await sendMessage(currentInput, sessionId, fullChatHistory, customerInfo);
       
       if (apiResponse && apiResponse.status === 'success') {
         const replyText = apiResponse.reply;
         
-        // 处理推荐
+        // 🔧 处理推荐 - 支持多个推荐的管理
         if (apiResponse.recommendations && apiResponse.recommendations.length > 0) {
+          console.log('📋 Received recommendations:', apiResponse.recommendations);
           if (onRecommendationUpdate) {
             onRecommendationUpdate(apiResponse.recommendations);
           }
@@ -184,12 +203,26 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     }
   };
 
+  // 🔧 调试信息：监控customerInfo变化
+  useEffect(() => {
+    if (customerInfo && Object.keys(customerInfo).length > 0) {
+      console.log('🔍 Chatbot received updated customerInfo:', customerInfo);
+    }
+  }, [customerInfo]);
+
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: '#fef7e8' }}>
       {/* Header */}
       <div className="px-6 py-4 border-b" style={{ backgroundColor: '#fef7e8' }}>
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold text-gray-800">Agent X</h1>
+          {/* 🔧 添加同步状态指示器 */}
+          {customerInfo && Object.keys(customerInfo).length > 0 && (
+            <div className="text-xs text-blue-600 flex items-center">
+              <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
+              Form data synced
+            </div>
+          )}
         </div>
       </div>
 
@@ -270,6 +303,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         {/* 状态信息 */}
         <div className="mt-2 text-xs text-gray-500 text-center">
           Press Enter to send • Shift+Enter for new line
+          {/* 🔧 添加同步状态提示 */}
+          {customerInfo && Object.keys(customerInfo).length > 0 && (
+            <span className="ml-2 text-blue-600">
+              • Form data will be included in requests
+            </span>
+          )}
         </div>
       </div>
     </div>

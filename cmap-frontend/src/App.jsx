@@ -23,7 +23,7 @@ try {
   );
 }
 
-// 🔧 改进的Product Comparison组件
+// 🔧 修复后的Product Comparison组件引用
 const ProductComparison = ({ recommendations, customerInfo }) => {
   console.log('ProductComparison received recommendations:', recommendations);
   
@@ -51,128 +51,9 @@ const ProductComparison = ({ recommendations, customerInfo }) => {
     );
   }
 
-  // 显示推荐产品
-  return (
-    <div className="p-6 space-y-6 h-full overflow-y-auto">
-      <div className="border-b pb-4">
-        <h2 className="text-2xl font-bold text-gray-800">Product Recommendations</h2>
-        <p className="text-sm text-gray-600 mt-1">
-          {recommendations.length} recommendation{recommendations.length > 1 ? 's' : ''} found based on your requirements
-        </p>
-      </div>
-
-      {recommendations.map((rec, index) => (
-        <div key={index} className="bg-white border rounded-lg shadow-sm p-6 hover:shadow-md transition-shadow">
-          <div className="flex justify-between items-start mb-4">
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-gray-800">
-                {rec.lender_name} - {rec.product_name}
-              </h3>
-              <div className="flex items-center space-x-4 mt-2">
-                <span className="text-2xl font-bold text-blue-600">
-                  {rec.base_rate}% p.a.
-                </span>
-                {rec.comparison_rate && (
-                  <span className="text-sm text-gray-600">
-                    Comparison: {rec.comparison_rate}% p.a.*
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="text-right">
-              {rec.monthly_payment && (
-                <>
-                  <div className="text-xl font-semibold text-green-600">
-                    ${rec.monthly_payment}/month
-                  </div>
-                  <div className="text-xs text-gray-500">estimated payment</div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* 贷款详情 */}
-          <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Max Loan:</span>
-              <span className="font-medium">{rec.max_loan_amount}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Terms:</span>
-              <span className="font-medium">{rec.loan_term_options}</span>
-            </div>
-          </div>
-
-          {/* 可折叠的详细信息 */}
-          <details className="mt-4">
-            <summary className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium">
-              View detailed requirements and fees
-            </summary>
-            
-            <div className="mt-3 space-y-4">
-              {/* 要求详情 */}
-              {rec.detailed_requirements && (
-                <div>
-                  <h4 className="font-medium text-gray-800 mb-2">📋 Requirements:</h4>
-                  <div className="grid grid-cols-1 gap-2 text-sm bg-gray-50 p-3 rounded">
-                    {Object.entries(rec.detailed_requirements).map(([key, value]) => (
-                      <div key={key} className="flex justify-between">
-                        <span className="text-gray-600 capitalize">{key.replace(/_/g, ' ')}:</span>
-                        <span className="font-medium">{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* 费用明细 */}
-              {rec.fees_breakdown && (
-                <div>
-                  <h4 className="font-medium text-gray-800 mb-2">💳 Fees:</h4>
-                  <div className="grid grid-cols-2 gap-2 text-sm bg-gray-50 p-3 rounded">
-                    {Object.entries(rec.fees_breakdown).map(([key, value]) => (
-                      <div key={key} className="flex justify-between">
-                        <span className="text-gray-600 capitalize">{key.replace(/_/g, ' ')}:</span>
-                        <span className="font-medium">{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* 文档要求 */}
-              {rec.documentation_requirements && rec.documentation_requirements.length > 0 && (
-                <div>
-                  <h4 className="font-medium text-gray-800 mb-2">📄 Documentation Required:</h4>
-                  <ul className="text-sm space-y-1 bg-gray-50 p-3 rounded">
-                    {rec.documentation_requirements.map((doc, i) => (
-                      <li key={i} className="flex items-start">
-                        <span className="text-blue-600 mr-2">•</span>
-                        <span>{doc}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          </details>
-
-          {/* 操作按钮区域 */}
-          <div className="mt-4 pt-4 border-t flex justify-end">
-            <button className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm">
-              Apply Now
-            </button>
-          </div>
-        </div>
-      ))}
-
-      {/* 免责声明 */}
-      <div className="mt-6 p-4 bg-gray-50 rounded text-xs text-gray-600">
-        <p>* Comparison rates are estimates and include typical fees. Actual rates may vary based on individual circumstances and lender assessment.</p>
-        <p className="mt-1">** Monthly payment estimates are indicative only. Final payments depend on approved loan amount, term, and individual pricing.</p>
-      </div>
-    </div>
-  );
+  // 🔧 使用修复后的ProductComparison组件逻辑
+  const ProductComparisonComponent = require('./components/ProductComparison').default;
+  return <ProductComparisonComponent recommendations={recommendations} customerInfo={customerInfo} />;
 };
 
 function App() {
@@ -181,10 +62,10 @@ function App() {
   // 对话历史状态 - 统一管理
   const [conversationHistory, setConversationHistory] = useState([]);
   
-  // 客户信息状态 - 从dynamic form同步
+  // 🔧 客户信息状态 - 优化管理，支持双向同步
   const [customerInfo, setCustomerInfo] = useState({});
   
-  // 推荐状态管理
+  // 🔧 推荐状态管理 - 支持多推荐管理
   const [recommendations, setRecommendations] = useState([]);
 
   // 处理新消息 - 从Chatbot传来
@@ -192,19 +73,44 @@ function App() {
     setConversationHistory(prev => [...prev, message]);
   };
 
-  // 处理表单更新 - 从Dynamic Form传来
+  // 🔧 处理表单更新 - 优化双向同步逻辑
   const handleFormUpdate = (updatedInfo) => {
-    setCustomerInfo(updatedInfo);
+    console.log('📝 App: Form updated with:', updatedInfo);
+    
+    // 🔧 深度比较，只有真正变化时才更新
+    const hasChanges = Object.keys(updatedInfo).some(key => {
+      const oldValue = customerInfo[key];
+      const newValue = updatedInfo[key];
+      return oldValue !== newValue;
+    });
+
+    if (hasChanges) {
+      setCustomerInfo(prev => {
+        const merged = { ...prev, ...updatedInfo };
+        console.log('🔄 App: CustomerInfo updated:', merged);
+        return merged;
+      });
+    }
   };
   
-  // 🔧 处理推荐更新 - 从Chatbot传来
+  // 🔧 处理推荐更新 - 支持多推荐管理和自动面板切换
   const handleRecommendationUpdate = (newRecommendations) => {
-    console.log('App received recommendations:', newRecommendations);
-    setRecommendations(newRecommendations);
+    console.log('📋 App received recommendations:', newRecommendations);
     
-    // 如果收到推荐且没有打开面板，自动打开Product Comparison面板来显示推荐
-    if (newRecommendations && newRecommendations.length > 0 && !activePanel) {
-      setActivePanel('Current Product Info');
+    if (newRecommendations && newRecommendations.length > 0) {
+      // 🔧 更新推荐状态
+      setRecommendations(newRecommendations);
+      
+      // 🔧 自动打开Product Comparison面板（如果没有面板激活）
+      if (!activePanel) {
+        setActivePanel('Current Product Info');
+        console.log('🎯 Auto-opened Product Comparison panel');
+      }
+      
+      // 🔧 如果已经在其他面板，给用户提示（可选）
+      else if (activePanel !== 'Current Product Info') {
+        console.log('💡 Recommendations available in Product Comparison panel');
+      }
     }
   };
 
@@ -221,17 +127,27 @@ function App() {
           />
         );
       case 'Loan Calculator':
-        // 贷款计算器始终显示计算器功能
+        // 🔧 贷款计算器传入最新的客户信息
         return <LoanCalculator customerInfo={customerInfo} />;
       case 'Current Product Info':
-        // 产品信息显示推荐产品比较
+        // 🔧 产品信息显示推荐产品比较，传入完整的推荐和客户信息
         return <ProductComparison recommendations={recommendations} customerInfo={customerInfo} />;
       case 'Promotions':
-        return <PromotionsShowcase />; // 🔧 新的优惠活动组件
+        return <PromotionsShowcase />;
       default:
         return null;
     }
   };
+
+  // 🔧 调试信息：监控关键状态变化
+  React.useEffect(() => {
+    console.log('🔍 App state update:', {
+      customerInfoKeys: Object.keys(customerInfo),
+      recommendationsCount: recommendations.length,
+      activePanel,
+      conversationLength: conversationHistory.length
+    });
+  }, [customerInfo, recommendations, activePanel, conversationHistory.length]);
 
   return (
     <div className="h-screen w-screen flex" style={{ backgroundColor: '#fef7e8' }}>
@@ -257,14 +173,25 @@ function App() {
             backgroundColor: '#fef7e8'
           }}
         >
+          {/* 🔧 修复后的Chatbot组件，传入最新的customerInfo */}
           <Chatbot 
             onNewMessage={handleNewMessage}
             conversationHistory={conversationHistory}
-            customerInfo={customerInfo}
+            customerInfo={customerInfo}  // 🔧 传入最新的客户信息
             onRecommendationUpdate={handleRecommendationUpdate}
           />
         </div>
       </div>
+
+      {/* 🔧 添加调试面板（开发时可用，生产时可移除） */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="fixed bottom-4 right-4 bg-black bg-opacity-75 text-white p-2 rounded text-xs max-w-xs">
+          <div>Panel: {activePanel || 'None'}</div>
+          <div>Customer fields: {Object.keys(customerInfo).length}</div>
+          <div>Recommendations: {recommendations.length}</div>
+          <div>Conversation: {conversationHistory.length} messages</div>
+        </div>
+      )}
     </div>
   );
 }
