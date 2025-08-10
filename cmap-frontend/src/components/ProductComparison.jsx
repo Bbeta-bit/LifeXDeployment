@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Info, DollarSign, Calendar, FileText, AlertCircle } from 'lucide-react';
+import { X, Info, DollarSign, Calendar, FileText, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 
 const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => {
   const [storedRecommendations, setStoredRecommendations] = useState([]);
@@ -62,7 +62,7 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
     }
   };
 
-  // 🔧 优化单个产品详细视图，添加状态标记
+  // 🔧 增强的单个产品详细视图，显示完整信息
   const renderSingleProduct = (product) => (
     <div className="p-6 space-y-6">
       <div className="border-b pb-4">
@@ -136,57 +136,76 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
         <div className="bg-green-50 p-4 rounded-lg">
           <h4 className="font-semibold text-green-800 mb-2 flex items-center">
             <FileText className="w-4 h-4 mr-1" />
-            Documentation
+            Documentation & Eligibility
           </h4>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span>Doc Type:</span>
               <span className="font-medium">{product.documentation_type}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between items-center">
               <span>Requirements Met:</span>
-              <span className={`font-medium ${product.requirements_met ? 'text-green-600' : 'text-red-600'}`}>
-                {product.requirements_met ? '✓ Yes' : '✗ No'}
+              <span className={`flex items-center font-medium ${product.requirements_met ? 'text-green-600' : 'text-orange-600'}`}>
+                {product.requirements_met ? (
+                  <>
+                    <CheckCircle className="w-4 h-4 mr-1" />
+                    Likely Eligible
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="w-4 h-4 mr-1" />
+                    Review Required
+                  </>
+                )}
               </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 详细要求 */}
+      {/* 🔧 详细要求 - 完整显示 */}
       {product.detailed_requirements && (
         <div className="bg-gray-50 p-4 rounded-lg">
-          <h4 className="font-semibold text-gray-800 mb-3">Eligibility Requirements</h4>
+          <h4 className="font-semibold text-gray-800 mb-3 flex items-center">
+            <CheckCircle className="w-4 h-4 mr-1" />
+            Eligibility Requirements
+          </h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             {Object.entries(product.detailed_requirements).map(([key, value]) => (
-              <div key={key} className="flex justify-between">
-                <span className="text-gray-600 capitalize">{key.replace(/_/g, ' ')}:</span>
-                <span className="font-medium text-right ml-2">{value}</span>
+              <div key={key} className="flex justify-between items-start">
+                <span className="text-gray-600 capitalize font-medium">{key.replace(/_/g, ' ')}:</span>
+                <span className="text-right ml-2 text-gray-800">{value}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* 费用明细 */}
+      {/* 🔧 费用明细 - 完整显示 */}
       {product.fees_breakdown && (
         <div className="bg-yellow-50 p-4 rounded-lg">
-          <h4 className="font-semibold text-yellow-800 mb-3">Fees Breakdown</h4>
+          <h4 className="font-semibold text-yellow-800 mb-3 flex items-center">
+            <DollarSign className="w-4 h-4 mr-1" />
+            Fees Breakdown
+          </h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             {Object.entries(product.fees_breakdown).map(([key, value]) => (
               <div key={key} className="flex justify-between">
                 <span className="text-gray-600 capitalize">{key.replace(/_/g, ' ')}:</span>
-                <span className="font-medium">{value}</span>
+                <span className="font-medium text-gray-800">{value}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* 利率条件 */}
+      {/* 🔧 利率条件 - 完整显示 */}
       {product.rate_conditions && (
         <div className="bg-purple-50 p-4 rounded-lg">
-          <h4 className="font-semibold text-purple-800 mb-3">Rate Conditions</h4>
+          <h4 className="font-semibold text-purple-800 mb-3 flex items-center">
+            <Info className="w-4 h-4 mr-1" />
+            Rate Conditions & Options
+          </h4>
           <div className="space-y-2 text-sm">
             {Object.entries(product.rate_conditions).map(([key, value]) => (
               <div key={key}>
@@ -198,10 +217,13 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
         </div>
       )}
 
-      {/* 文档要求 */}
+      {/* 🔧 文档要求 - 完整显示 */}
       {product.documentation_requirements && (
         <div className="bg-indigo-50 p-4 rounded-lg">
-          <h4 className="font-semibold text-indigo-800 mb-3">Documentation Required</h4>
+          <h4 className="font-semibold text-indigo-800 mb-3 flex items-center">
+            <FileText className="w-4 h-4 mr-1" />
+            Documentation Required
+          </h4>
           <ul className="list-disc list-inside space-y-1 text-sm">
             {product.documentation_requirements.map((req, index) => (
               <li key={index} className="text-gray-700">{req}</li>
@@ -209,6 +231,19 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
           </ul>
         </div>
       )}
+
+      {/* 🔧 申请建议 */}
+      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+        <h4 className="font-medium text-blue-800 mb-2">💡 Application Tips</h4>
+        <div className="text-sm text-blue-700 space-y-1">
+          <p>• Review all eligibility requirements carefully before applying</p>
+          <p>• Ensure you have all required documentation ready</p>
+          <p>• Consider getting pre-approval to understand your borrowing capacity</p>
+          {!product.requirements_met && (
+            <p className="text-orange-700 font-medium">⚠️ Some requirements may need clarification - consider speaking with the lender</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 
@@ -285,7 +320,7 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
               <div className="flex flex-col">
                 <span className="text-gray-600 mb-1">Monthly Payment:</span>
                 <span className="font-medium text-green-600">
-                  {product.monthly_payment ? `$${product.monthly_payment}` : 'See details'}
+                  {product.monthly_payment ? `${product.monthly_payment}` : 'See details'}
                 </span>
               </div>
               <div className="flex flex-col">
@@ -294,14 +329,32 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
               </div>
             </div>
 
+            {/* 🔧 快速要求检查 */}
+            {product.detailed_requirements && (
+              <div className="mb-4 p-3 bg-gray-50 rounded border">
+                <h5 className="font-medium text-gray-800 mb-2 text-sm">Key Requirements:</h5>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                  {Object.entries(product.detailed_requirements).slice(0, 4).map(([key, value]) => (
+                    <div key={key} className="flex justify-between">
+                      <span className="text-gray-600">{key.replace(/_/g, ' ')}:</span>
+                      <span className="font-medium">{value}</span>
+                    </div>
+                  ))}
+                </div>
+                {Object.keys(product.detailed_requirements).length > 4 && (
+                  <p className="text-xs text-gray-500 mt-1">+ {Object.keys(product.detailed_requirements).length - 4} more requirements</p>
+                )}
+              </div>
+            )}
+
             {/* 操作按钮 */}
-            <div className="flex justify-end">
+            <div className="flex justify-end space-x-2">
               <button
                 onClick={() => handleProductClick(product)}
                 className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
               >
                 <Info className="w-4 h-4 mr-1" />
-                View Details
+                View All Details
               </button>
             </div>
           </div>
@@ -312,7 +365,7 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
       <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
         <h4 className="font-medium text-blue-800 mb-2">💡 Comparison Tip</h4>
         <p className="text-sm text-blue-700">
-          Your current recommendation reflects your latest requirements. Compare the key differences to see how adjustments impact your loan terms.
+          Your current recommendation reflects your latest requirements. Compare the key differences to see how adjustments impact your loan terms. Click "View All Details" to see complete eligibility requirements, fees, and documentation needed.
         </p>
       </div>
     </div>

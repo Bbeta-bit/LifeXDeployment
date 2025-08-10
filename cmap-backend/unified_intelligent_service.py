@@ -982,7 +982,7 @@ BFS (BRANDED FINANCIAL):
         }
 
     def _format_recommendation_with_comparison_guide(self, recommendations: List[Dict], profile: CustomerProfile, is_adjustment: bool = False) -> str:
-        """🔧 格式化推荐消息，包含ProductComparison交互指导"""
+        """🔧 简化的推荐消息格式，不显示产品详情"""
         
         # 获取当前推荐
         current_rec = None
@@ -1001,41 +1001,28 @@ BFS (BRANDED FINANCIAL):
         lender = current_rec.get("lender_name", "Unknown")
         product = current_rec.get("product_name", "Unknown Product")
         base_rate = current_rec.get("base_rate", 0)
-        comparison_rate = current_rec.get("comparison_rate", 0)
-        monthly_payment = current_rec.get("monthly_payment", 0)
         
         if is_adjustment:
-            message = f"Perfect! I've found an updated option based on your requirements:\n\n"
+            message = f"Perfect! I've found an updated recommendation based on your requirements.\n\n"
         else:
-            message = f"Great news! I've found an excellent loan option for you:\n\n"
+            message = f"Great news! I've found an excellent loan option for you.\n\n"
         
-        message += f"**{lender} - {product}**\n"
-        message += f"• Interest Rate: {base_rate}% p.a.\n"
-        if comparison_rate:
-            message += f"• Comparison Rate: {comparison_rate}% p.a.*\n"
-        if monthly_payment:
-            loan_amount = profile.desired_loan_amount or 50000
-            message += f"• Monthly Payment: ${monthly_payment:,.2f}** (${loan_amount:,.0f} over 60 months)\n"
-        if current_rec.get("max_loan_amount"):
-            message += f"• Maximum Loan: {current_rec['max_loan_amount']}\n"
+        # 🔧 简化显示：只显示基本信息
+        message += f"**{lender} - {product}** at {base_rate}% p.a.\n\n"
         
-        # 🔧 ProductComparison交互指导
-        message += f"\n**📋 What's Next:**\n"
-        message += f"Your personalized recommendation is now displayed in the **Product Comparison panel** on the left. "
-        message += f"Please review the complete details and let me know:\n\n"
-        message += f"• Does this meet all your requirements?\n"
-        message += f"• Would you like a **lower interest rate**, **different loan term**, or **adjusted monthly payment**?\n"
-        message += f"• Any other specific conditions you'd like me to optimize for?\n\n"
+        # 🔧 重点引导到左侧面板
+        message += f"📋 **Please check the Product Comparison panel on the left** to review all loan requirements, eligibility criteria, and fees.\n\n"
+        
+        # 🔧 确认和调整提示
+        message += f"After reviewing the complete details, please let me know:\n"
+        message += f"• Do you meet all the eligibility requirements?\n"
+        message += f"• Would you like to adjust the **loan term**, **interest rate**, or **loan amount**?\n"
+        message += f"• Any specific conditions you'd like me to optimize?\n\n"
         
         if is_adjustment:
-            # 🔧 调整后的确认提示
-            message += f"Is there anything else you'd like me to adjust or optimize for?"
+            message += f"Let me know if you need further adjustments!"
         else:
-            message += f"Just tell me what you'd like to adjust, and I'll find better options tailored to your needs!"
-        
-        # 免责声明
-        message += f"\n\n*Comparison rate includes fees and charges"
-        message += f"\n**Monthly payment estimate - actual may vary based on final terms"
+            message += f"I can find alternative options if this doesn't meet your needs."
         
         return message
 

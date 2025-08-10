@@ -175,41 +175,94 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
     }
   };
 
-  // Extract information using rules
+  // 🔧 增强的规则提取方法，修复property_status识别
   const extractUsingRules = (text) => {
     const lowercaseText = text.toLowerCase();
     const extracted = {};
 
-    // Loan type
+    // 🔧 修复房产状态识别 - 更精确的关键词匹配
+    const propertyOwnerPatterns = [
+      /\bown\s+property\b/,
+      /\bproperty\s+owner\b/,
+      /\bhave\s+property\b/,
+      /\bown\s+a\s+house\b/,
+      /\bown\s+a\s+home\b/,
+      /\bproperty_owner\b/,
+      /\bhomeowner\b/
+    ];
+    
+    const nonPropertyOwnerPatterns = [
+      /\bno\s+property\b/,
+      /\bdon'?t\s+own\b/,
+      /\brent\b/,
+      /\brenting\b/,
+      /\bnon.property\b/,
+      /\bwithout\s+property\b/,
+      /\bnon_property_owner\b/,
+      /\btenant\b/
+    ];
+
+    // 检查房产拥有状态
+    const isPropertyOwner = propertyOwnerPatterns.some(pattern => pattern.test(lowercaseText));
+    const isNonPropertyOwner = nonPropertyOwnerPatterns.some(pattern => pattern.test(lowercaseText));
+
+    // 🔧 优先级：明确的property_owner关键词 > 否定词汇
+    if (isPropertyOwner && !isNonPropertyOwner) {
+      extracted.property_status = 'property_owner';
+    } else if (isNonPropertyOwner && !isPropertyOwner) {
+      extracted.property_status = 'non_property_owner';
+    } else if (lowercaseText.includes('property_owner')) {
+      // 直接包含property_owner的情况
+      extracted.property_status = 'property_owner';
+    }
+
+    // 🔧 增强否定语句处理
+    const negative_abn_patterns = [
+      r"no\s+abn", r"don't\s+have\s+abn", r"without\s+abn", 
+      r"no\s+abn\s+and\s+gst", r"no\s+abn.*gst"
+    ];
+    const negative_gst_patterns = [
+      r"no\s+gst", r"don't\s+have\s+gst", r"not\s+registered\s+for\s+gst",
+      r"no\s+abn\s+and\s+gst", r"no.*gst.*years"
+    ];
+    
+    for (const pattern of negative_abn_patterns) {
+      if (new RegExp(pattern, 'i').test(lowercaseText)) {
+        extracted.ABN_years = 0;
+        break;
+      }
+    }
+        
+    for (const pattern of negative_gst_patterns) {
+      if (new RegExp(pattern, 'i').test(lowercaseText)) {
+        extracted.GST_years = 0;
+        break;
+      }
+    }
+
+    // 贷款类型
     if (lowercaseText.includes('business') || lowercaseText.includes('commercial') || lowercaseText.includes('company')) {
       extracted.loan_type = 'commercial';
     } else if (lowercaseText.includes('personal') || lowercaseText.includes('consumer')) {
       extracted.loan_type = 'consumer';
     }
 
-    // Asset type
+    // 资产类型
     if (lowercaseText.includes('car') || lowercaseText.includes('vehicle') || lowercaseText.includes('truck') || lowercaseText.includes('van')) {
       extracted.asset_type = 'motor_vehicle';
     } else if (lowercaseText.includes('equipment') || lowercaseText.includes('machinery')) {
       extracted.asset_type = 'primary';
     }
 
-    // Property status
-    if (lowercaseText.includes('own property') || lowercaseText.includes('property owner') || lowercaseText.includes('have property')) {
-      extracted.property_status = 'property_owner';
-    } else if (lowercaseText.includes('no property') || lowercaseText.includes("don't own") || lowercaseText.includes('rent')) {
-      extracted.property_status = 'non_property_owner';
-    }
-
-    // Numbers
+    // 数值提取
     const abnMatch = text.match(/(\d+)\s*years?\s*(?:abn|ABN)|(?:abn|ABN).*?(\d+)\s*years?/i);
-    if (abnMatch) {
+    if (abnMatch && extracted.ABN_years === undefined) {
       const years = parseInt(abnMatch[1] || abnMatch[2]);
       if (years >= 0 && years <= 50) extracted.ABN_years = years;
     }
 
     const gstMatch = text.match(/(\d+)\s*years?\s*(?:gst|GST)|(?:gst|GST).*?(\d+)\s*years?/i);
-    if (gstMatch) {
+    if (gstMatch && extracted.GST_years === undefined) {
       const years = parseInt(gstMatch[1] || gstMatch[2]);
       if (years >= 0 && years <= 50) extracted.GST_years = years;
     }
@@ -220,13 +273,21 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
       if (score >= 300 && score <= 900) extracted.credit_score = score;
     }
 
-    // Vehicle information
-    const carBrands = ['toyota', 'holden', 'ford', 'mazda', 'honda', 'subaru', 'mitsubishi', 'nissan', 'hyundai', 'kia', 'volkswagen', 'bmw', 'mercedes', 'audi'];
+    // 车辆品牌识别
+    const carBrands = ['toyota', 'holden', 'ford', 'mazda', 'honda', 'subaru', 'mitsubishi', 'nissan', 'hyundai', 'kia', 'volkswagen', 'bmw', 'mercedes', 'audi', 'tesla'];
     for (const brand of carBrands) {
       if (lowercaseText.includes(brand)) {
         extracted.vehicle_make = brand.charAt(0).toUpperCase() + brand.slice(1);
         break;
       }
+    }
+
+    // 车辆型号 - 特殊处理Tesla Model Y
+    if (lowercaseText.includes('model y') || lowercaseText.includes('tesla model y')) {
+      extracted.vehicle_make = 'Tesla';
+      extracted.vehicle_model = 'Model Y';
+      extracted.vehicle_type = 'passenger_car';
+      extracted.asset_type = 'motor_vehicle';
     }
 
     if (lowercaseText.includes('new car') || lowercaseText.includes('new vehicle')) {
@@ -235,7 +296,7 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
       extracted.vehicle_condition = 'used';
     }
 
-    // Loan amount
+    // 贷款金额
     const amountMatch = text.match(/[\$]?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)|(\d+)k|(\d+)\s*thousand/i);
     if (amountMatch) {
       let amount;
@@ -252,6 +313,7 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
       }
     }
 
+    console.log('🔍 Enhanced extraction result:', extracted);
     return extracted;
   };
 
@@ -318,7 +380,7 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
     }
   }, [conversationHistory, extractInfoFromConversation, autoExtractEnabled]);
 
-  // 🔧 下载功能
+  // 🔧 PDF下载功能
   const downloadInformation = () => {
     // 检查是否有信息可下载
     const hasCustomerInfo = Object.values(customerInfo).some(value => 
@@ -331,15 +393,88 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
       return;
     }
 
-    // 创建下载内容
-    let content = `LIFEX LOAN INFORMATION SUMMARY\n`;
-    content += `Generated: ${new Date().toLocaleString()}\n`;
-    content += `${'='.repeat(50)}\n\n`;
+    // 🔧 使用现代浏览器的打印功能生成PDF
+    const printWindow = window.open('', '_blank');
+    
+    // 创建PDF内容
+    let content = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>LIFEX Loan Information Summary</title>
+        <style>
+            body { 
+                font-family: Arial, sans-serif; 
+                max-width: 800px; 
+                margin: 0 auto; 
+                padding: 20px; 
+                line-height: 1.6;
+                color: #333;
+            }
+            .header { 
+                text-align: center; 
+                border-bottom: 2px solid #333; 
+                padding-bottom: 20px; 
+                margin-bottom: 30px; 
+            }
+            .section { 
+                margin-bottom: 25px; 
+                border: 1px solid #ddd; 
+                padding: 15px; 
+                border-radius: 5px;
+            }
+            .section h3 { 
+                color: #2563eb; 
+                border-bottom: 1px solid #e5e7eb; 
+                padding-bottom: 8px; 
+                margin-top: 0;
+            }
+            .info-grid { 
+                display: grid; 
+                grid-template-columns: 1fr 1fr; 
+                gap: 10px; 
+                margin-top: 10px;
+            }
+            .info-item { 
+                display: flex; 
+                justify-content: space-between; 
+                padding: 5px 0; 
+                border-bottom: 1px dotted #ccc;
+            }
+            .label { 
+                font-weight: bold; 
+                color: #555;
+            }
+            .recommendation { 
+                border: 2px solid #10b981; 
+                background-color: #f0fdf4; 
+                margin-bottom: 20px;
+            }
+            .disclaimer { 
+                background-color: #fef3c7; 
+                border: 1px solid #f59e0b; 
+                padding: 15px; 
+                border-radius: 5px; 
+                font-size: 12px; 
+                margin-top: 30px;
+            }
+            @media print {
+                body { margin: 0; padding: 15px; }
+                .no-print { display: none; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>LIFEX LOAN INFORMATION SUMMARY</h1>
+            <p>Generated: ${new Date().toLocaleString()}</p>
+        </div>
+    `;
 
     // 客户信息部分
     if (hasCustomerInfo) {
-      content += `CUSTOMER INFORMATION:\n`;
-      content += `${'-'.repeat(25)}\n`;
+      content += `<div class="section">
+        <h3>Customer Information</h3>`;
       
       const sections = {
         'Basic Details': ['loan_type', 'asset_type', 'property_status'],
@@ -358,88 +493,144 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
         });
 
         if (sectionData.length > 0) {
-          content += `\n${sectionName}:\n`;
+          content += `<h4>${sectionName}</h4><div class="info-grid">`;
           sectionData.forEach(field => {
             const config = fieldConfig[field];
             const value = customerInfo[field];
             const displayValue = config?.type === 'select' 
               ? config.options?.find(opt => opt.value === value)?.label || value
               : value;
-            content += `  • ${config?.label || field}: ${displayValue}\n`;
+            content += `
+              <div class="info-item">
+                <span class="label">${config?.label || field}:</span>
+                <span>${displayValue}</span>
+              </div>`;
           });
+          content += `</div>`;
         }
       });
 
       // 自动提取的字段
       if (customerInfo.extracted_fields.length > 0) {
-        content += `\nAuto-extracted Fields: ${customerInfo.extracted_fields.length}\n`;
-        content += `Last Updated: ${customerInfo.last_updated ? new Date(customerInfo.last_updated).toLocaleString() : 'N/A'}\n`;
+        content += `
+          <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+            <strong>Auto-extracted Fields:</strong> ${customerInfo.extracted_fields.length}<br>
+            <strong>Last Updated:</strong> ${customerInfo.last_updated ? new Date(customerInfo.last_updated).toLocaleString() : 'N/A'}
+          </div>`;
       }
+      
+      content += `</div>`;
     }
 
     // 推荐产品部分
     if (hasRecommendations) {
-      content += `\n\nPRODUCT RECOMMENDATIONS:\n`;
-      content += `${'-'.repeat(25)}\n`;
+      content += `<div class="section">
+        <h3>Product Recommendations</h3>`;
       
       recommendations.forEach((rec, index) => {
-        content += `\n${index + 1}. ${rec.lender_name} - ${rec.product_name}\n`;
-        content += `   Interest Rate: ${rec.base_rate}% p.a.\n`;
+        content += `
+          <div class="recommendation">
+            <h4>${index + 1}. ${rec.lender_name} - ${rec.product_name}</h4>
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="label">Interest Rate:</span>
+                <span>${rec.base_rate}% p.a.</span>
+              </div>`;
+              
         if (rec.comparison_rate) {
-          content += `   Comparison Rate: ${rec.comparison_rate}% p.a.\n`;
+          content += `
+              <div class="info-item">
+                <span class="label">Comparison Rate:</span>
+                <span>${rec.comparison_rate}% p.a.</span>
+              </div>`;
         }
+        
         if (rec.monthly_payment) {
-          content += `   Monthly Payment: ${rec.monthly_payment}\n`;
+          content += `
+              <div class="info-item">
+                <span class="label">Monthly Payment:</span>
+                <span>${rec.monthly_payment}</span>
+              </div>`;
         }
-        content += `   Max Loan Amount: ${rec.max_loan_amount}\n`;
-        content += `   Loan Terms: ${rec.loan_term_options}\n`;
-        content += `   Documentation: ${rec.documentation_type}\n`;
-        content += `   Requirements Met: ${rec.requirements_met ? 'Yes' : 'No'}\n`;
+        
+        content += `
+              <div class="info-item">
+                <span class="label">Max Loan Amount:</span>
+                <span>${rec.max_loan_amount}</span>
+              </div>
+              <div class="info-item">
+                <span class="label">Loan Terms:</span>
+                <span>${rec.loan_term_options}</span>
+              </div>
+              <div class="info-item">
+                <span class="label">Documentation:</span>
+                <span>${rec.documentation_type}</span>
+              </div>
+              <div class="info-item">
+                <span class="label">Requirements Met:</span>
+                <span>${rec.requirements_met ? 'Yes' : 'Review Required'}</span>
+              </div>
+            </div>`;
 
         // 详细要求
         if (rec.detailed_requirements) {
-          content += `   \n   Eligibility Requirements:\n`;
+          content += `<h5>Eligibility Requirements:</h5><div class="info-grid">`;
           Object.entries(rec.detailed_requirements).forEach(([key, value]) => {
-            content += `     • ${key.replace(/_/g, ' ')}: ${value}\n`;
+            content += `
+              <div class="info-item">
+                <span class="label">${key.replace(/_/g, ' ')}:</span>
+                <span>${value}</span>
+              </div>`;
           });
+          content += `</div>`;
         }
 
         // 费用
         if (rec.fees_breakdown) {
-          content += `   \n   Fees:\n`;
+          content += `<h5>Fees:</h5><div class="info-grid">`;
           Object.entries(rec.fees_breakdown).forEach(([key, value]) => {
-            content += `     • ${key.replace(/_/g, ' ')}: ${value}\n`;
+            content += `
+              <div class="info-item">
+                <span class="label">${key.replace(/_/g, ' ')}:</span>
+                <span>${value}</span>
+              </div>`;
           });
+          content += `</div>`;
         }
 
-        // 文档要求
-        if (rec.documentation_requirements && rec.documentation_requirements.length > 0) {
-          content += `   \n   Documentation Required:\n`;
-          rec.documentation_requirements.forEach(doc => {
-            content += `     • ${doc}\n`;
-          });
-        }
-        
-        content += `\n`;
+        content += `</div>`;
       });
+      
+      content += `</div>`;
     }
 
     // 免责声明
-    content += `\n${'='.repeat(50)}\n`;
-    content += `DISCLAIMER:\n`;
-    content += `This summary is for informational purposes only. Interest rates, terms, and conditions are subject to change and final approval by the lender. All calculations are estimates and actual payments may vary. Please consult with a financial advisor for personalized advice.\n`;
-    content += `\nGenerated by LIFEX Loan Agent System\n`;
+    content += `
+        <div class="disclaimer">
+            <h4>DISCLAIMER:</h4>
+            <p>This summary is for informational purposes only. Interest rates, terms, and conditions are subject to change and final approval by the lender. All calculations are estimates and actual payments may vary. Please consult with a financial advisor for personalized advice.</p>
+            <p><strong>Generated by LIFEX Loan Agent System</strong></p>
+        </div>
+        
+        <div class="no-print" style="text-align: center; margin-top: 30px;">
+            <button onclick="window.print()" style="background: #2563eb; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">
+                Generate PDF
+            </button>
+            <button onclick="window.close()" style="background: #6b7280; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-left: 10px;">
+                Close
+            </button>
+        </div>
+    </body>
+    </html>`;
 
-    // 创建并下载文件
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `LIFEX_Loan_Summary_${new Date().toISOString().split('T')[0]}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    printWindow.document.write(content);
+    printWindow.document.close();
+
+    // 🔧 自动触发打印对话框
+    setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+    }, 500);
   };
 
   // Clear form

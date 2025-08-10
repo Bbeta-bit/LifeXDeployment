@@ -290,38 +290,41 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
 
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: '#fef7e8' }}>
-      {/* Header */}
+      {/* Header - 🔧 移除连接状态显示 */}
       <div className="px-6 py-4 border-b" style={{ backgroundColor: '#fef7e8' }}>
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold text-gray-800">Agent X</h1>
-          <div className="flex items-center space-x-3">
-            {/* 连接状态指示器 */}
-            <div className={`flex items-center text-xs ${
-              isConnected ? 'text-green-600' : 'text-red-600'
-            }`}>
-              <div className={`w-2 h-2 rounded-full mr-2 ${
-                isConnected ? 'bg-green-500' : 'bg-red-500'
-              }`}></div>
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </div>
-            
-            {/* 🔧 添加同步状态指示器 */}
-            {customerInfo && Object.keys(customerInfo).length > 0 && (
-              <div className="text-xs text-blue-600 flex items-center">
-                <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
-                Form data synced
+          {/* 🔧 仅在开发环境显示调试信息 */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="flex items-center space-x-3">
+              {/* 连接状态指示器 */}
+              <div className={`flex items-center text-xs ${
+                isConnected ? 'text-green-600' : 'text-red-600'
+              }`}>
+                <div className={`w-2 h-2 rounded-full mr-2 ${
+                  isConnected ? 'bg-green-500' : 'bg-red-500'
+                }`}></div>
+                {isConnected ? 'Connected' : 'Disconnected'}
               </div>
-            )}
-          </div>
+              
+              {/* Form data同步状态 */}
+              {customerInfo && Object.keys(customerInfo).length > 0 && (
+                <div className="text-xs text-blue-600 flex items-center">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
+                  Form synced
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 🔧 改进的连接状态显示 */}
-      {!isConnected && (
+      {/* 🔧 只有在真正无法连接时才显示连接错误 */}
+      {!isConnected && connectionError && (
         <div className="px-6 py-3 bg-red-50 border-b border-red-200">
           <div className="flex items-center justify-between">
             <div className="text-red-700 text-sm">
-              ⚠️ {connectionError || 'Connecting to service...'}
+              ⚠️ Connection issue. Please check your internet and try again.
             </div>
             <button
               onClick={handleReconnect}
@@ -354,12 +357,6 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
               }`}
             >
               {m.text}
-              {/* 🔧 添加时间戳（开发时可见） */}
-              {process.env.NODE_ENV === 'development' && (
-                <div className="text-xs opacity-50 mt-1">
-                  {new Date(m.timestamp).toLocaleTimeString()}
-                </div>
-              )}
             </div>
           </div>
         ))}
@@ -377,7 +374,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         )}
       </div>
 
-      {/* 输入区域 */}
+      {/* 输入区域 - 🔧 简化状态提示 */}
       <div className="px-6 py-4 border-t" style={{ backgroundColor: '#fef7e8' }}>
         <div className="relative">
           <textarea
@@ -408,22 +405,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           </button>
         </div>
         
-        {/* 状态信息 */}
-        <div className="mt-2 text-xs text-gray-500 text-center">
-          Press Enter to send • Shift+Enter for new line
-          {/* 🔧 添加同步状态提示 */}
-          {customerInfo && Object.keys(customerInfo).length > 0 && (
-            <span className="ml-2 text-blue-600">
-              • Form data will be included in requests
-            </span>
-          )}
-          {/* 🔧 显示会话ID（开发时） */}
-          {process.env.NODE_ENV === 'development' && sessionId && (
-            <span className="ml-2 text-gray-400">
-              • Session: {sessionId.split('_')[1]}
-            </span>
-          )}
-        </div>
+        {/* 🔧 移除状态信息，保持简洁 */}
       </div>
     </div>
   );
