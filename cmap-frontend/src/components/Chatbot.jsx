@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommendationUpdate }) => {
+const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommendationUpdate, onError }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [sessionId, setSessionId] = useState('');
+  const [connectionError, setConnectionError] = useState(null);
   
   const chatRef = useRef(null);
   const textareaRef = useRef(null);
@@ -31,24 +32,46 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     checkConnection();
   }, []);
 
-  // 简单的连接检查
-  const checkConnection = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/health`, {
-        method: 'GET',
-        mode: 'cors',
-      });
-      
-      if (response.ok) {
-        setIsConnected(true);
+  // 🔧 增强的连接检查，带重试机制
+  const checkConnection = async (retries = 3) => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        console.log(`🔍 Checking connection (attempt ${attempt}/${retries})...`);
+        
+        const response = await fetch(`${API_BASE_URL}/health`, {
+          method: 'GET',
+          mode: 'cors',
+          signal: AbortSignal.timeout(10000), // 10秒超时
+        });
+        
+        if (response.ok) {
+          console.log('✅ Connection successful');
+          setIsConnected(true);
+          setConnectionError(null);
+          return;
+        } else {
+          console.warn(`⚠️ Health check failed: ${response.status}`);
+        }
+      } catch (error) {
+        console.warn(`❌ Connection attempt ${attempt} failed:`, error.message);
+        
+        if (attempt === retries) {
+          setConnectionError(`Failed to connect after ${retries} attempts`);
+          setIsConnected(false);
+          
+          // 如果有错误回调，通知父组件
+          if (onError) {
+            onError(new Error(`Connection failed: ${error.message}`));
+          }
+        } else {
+          // 等待后重试
+          await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+        }
       }
-    } catch (error) {
-      console.log('Connection check failed:', error);
-      setIsConnected(false);
     }
   };
 
-  // 🔧 修改发送消息函数，添加customerInfo支持
+  // 🔧 修改发送消息函数，添加更强的错误处理
   const sendMessage = async (message, sessionId, chatHistory = [], currentCustomerInfo = null) => {
     const payload = {
       message: message,
@@ -71,6 +94,8 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       }
     }
 
+    console.log('📤 Sending payload:', JSON.stringify(payload, null, 2));
+
     const response = await fetch(`${API_BASE_URL}/chat`, {
       method: 'POST',
       headers: {
@@ -78,16 +103,20 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       },
       body: JSON.stringify(payload),
       mode: 'cors',
+      signal: AbortSignal.timeout(30000), // 30秒超时
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
-    return await response.json();
+    const responseData = await response.json();
+    console.log('📥 Received response:', responseData);
+    return responseData;
   };
 
-  // 🔧 修改处理发送函数，使用最新的customerInfo
+  // 🔧 修改处理发送函数，增强错误处理和用户反馈
   const handleSend = async () => {
     if (!input.trim() || isLoading || !sessionId) return;
 
@@ -113,6 +142,16 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     setIsLoading(true);
 
     try {
+      // 🔧 检查连接状态
+      if (!isConnected) {
+        console.log('🔄 Not connected, attempting to reconnect...');
+        await checkConnection(1); // 快速重连尝试
+        
+        if (!isConnected) {
+          throw new Error('Unable to connect to server. Please check your internet connection.');
+        }
+      }
+
       // 构建完整对话历史
       const fullChatHistory = [
         ...conversationHistory,
@@ -127,14 +166,27 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       console.log('📤 Sending with customerInfo:', customerInfo);
       const apiResponse = await sendMessage(currentInput, sessionId, fullChatHistory, customerInfo);
       
-      if (apiResponse && apiResponse.status === 'success') {
+      // 🔧 增强的响应验证
+      if (!apiResponse) {
+        throw new Error('Empty response from server');
+      }
+
+      if (apiResponse.status === 'success' && apiResponse.reply) {
         const replyText = apiResponse.reply;
         
-        // 🔧 处理推荐 - 支持多个推荐的管理
-        if (apiResponse.recommendations && apiResponse.recommendations.length > 0) {
+        // 🔧 处理推荐 - 支持多个推荐的管理，增强验证
+        if (apiResponse.recommendations && Array.isArray(apiResponse.recommendations) && apiResponse.recommendations.length > 0) {
           console.log('📋 Received recommendations:', apiResponse.recommendations);
-          if (onRecommendationUpdate) {
-            onRecommendationUpdate(apiResponse.recommendations);
+          
+          // 验证推荐数据结构
+          const validRecommendations = apiResponse.recommendations.filter(rec => 
+            rec && rec.lender_name && rec.product_name && rec.base_rate
+          );
+          
+          if (validRecommendations.length > 0 && onRecommendationUpdate) {
+            onRecommendationUpdate(validRecommendations);
+          } else {
+            console.warn('⚠️ Received invalid recommendation data');
           }
         }
         
@@ -155,15 +207,30 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           });
         }
       } else {
-        throw new Error('API returned error status');
+        // 🔧 处理API返回的错误状态
+        const errorMessage = apiResponse.reply || 'Server returned an error status';
+        throw new Error(errorMessage);
       }
       
     } catch (error) {
-      console.error('Send failed:', error);
+      console.error('❌ Send failed:', error);
       
+      // 🔧 更智能的错误处理和用户友好的错误消息
       let errorMessage = "I'm having trouble connecting. Please try again in a moment.";
-      if (error.message.includes('timeout')) {
-        errorMessage = "Request timed out. Please try again.";
+      
+      if (error.name === 'AbortError' || error.message.includes('timeout')) {
+        errorMessage = "Request timed out. The server might be busy. Please try again.";
+      } else if (error.message.includes('HTTP 429')) {
+        errorMessage = "Server is currently busy. Please wait a moment and try again.";
+      } else if (error.message.includes('HTTP 500')) {
+        errorMessage = "There's a temporary server issue. Please try again in a few minutes.";
+      } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+        errorMessage = "Network connection issue. Please check your internet connection and try again.";
+        // 标记为未连接，下次会自动重连
+        setIsConnected(false);
+      } else if (error.message.includes('Unable to connect')) {
+        errorMessage = error.message;
+        setIsConnected(false);
       }
       
       const botErrorMessage = { 
@@ -174,6 +241,11 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       };
       
       setMessages(prev => [...prev, botErrorMessage]);
+      
+      // 🔧 通知父组件错误（如果有错误处理回调）
+      if (onError) {
+        onError(error);
+      }
       
     } finally {
       setIsLoading(false);
@@ -203,6 +275,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     }
   };
 
+  // 🔧 重连功能
+  const handleReconnect = async () => {
+    setConnectionError(null);
+    await checkConnection(3);
+  };
+
   // 🔧 调试信息：监控customerInfo变化
   useEffect(() => {
     if (customerInfo && Object.keys(customerInfo).length > 0) {
@@ -216,21 +294,41 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       <div className="px-6 py-4 border-b" style={{ backgroundColor: '#fef7e8' }}>
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold text-gray-800">Agent X</h1>
-          {/* 🔧 添加同步状态指示器 */}
-          {customerInfo && Object.keys(customerInfo).length > 0 && (
-            <div className="text-xs text-blue-600 flex items-center">
-              <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
-              Form data synced
+          <div className="flex items-center space-x-3">
+            {/* 连接状态指示器 */}
+            <div className={`flex items-center text-xs ${
+              isConnected ? 'text-green-600' : 'text-red-600'
+            }`}>
+              <div className={`w-2 h-2 rounded-full mr-2 ${
+                isConnected ? 'bg-green-500' : 'bg-red-500'
+              }`}></div>
+              {isConnected ? 'Connected' : 'Disconnected'}
             </div>
-          )}
+            
+            {/* 🔧 添加同步状态指示器 */}
+            {customerInfo && Object.keys(customerInfo).length > 0 && (
+              <div className="text-xs text-blue-600 flex items-center">
+                <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
+                Form data synced
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* 连接状态 */}
+      {/* 🔧 改进的连接状态显示 */}
       {!isConnected && (
-        <div className="px-6 py-2 bg-yellow-50 border-b border-yellow-200">
-          <div className="text-yellow-700 text-sm">
-            ⚠️ Connecting to service... Please wait
+        <div className="px-6 py-3 bg-red-50 border-b border-red-200">
+          <div className="flex items-center justify-between">
+            <div className="text-red-700 text-sm">
+              ⚠️ {connectionError || 'Connecting to service...'}
+            </div>
+            <button
+              onClick={handleReconnect}
+              className="text-xs bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
+            >
+              Retry
+            </button>
           </div>
         </div>
       )}
@@ -256,6 +354,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
               }`}
             >
               {m.text}
+              {/* 🔧 添加时间戳（开发时可见） */}
+              {process.env.NODE_ENV === 'development' && (
+                <div className="text-xs opacity-50 mt-1">
+                  {new Date(m.timestamp).toLocaleTimeString()}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -282,7 +386,11 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder={isConnected ? "Tell me about your loan requirements..." : "Connecting..."}
+            placeholder={
+              !isConnected ? "Connecting..." :
+              isLoading ? "Sending..." :
+              "Tell me about your loan requirements..."
+            }
             className="w-full resize-none rounded-xl border border-gray-300 px-5 py-4 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
             disabled={isLoading || !sessionId || !isConnected}
             style={{ minHeight: '56px', maxHeight: '120px' }}
@@ -307,6 +415,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           {customerInfo && Object.keys(customerInfo).length > 0 && (
             <span className="ml-2 text-blue-600">
               • Form data will be included in requests
+            </span>
+          )}
+          {/* 🔧 显示会话ID（开发时） */}
+          {process.env.NODE_ENV === 'development' && sessionId && (
+            <span className="ml-2 text-gray-400">
+              • Session: {sessionId.split('_')[1]}
             </span>
           )}
         </div>

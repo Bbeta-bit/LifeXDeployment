@@ -1,3 +1,4 @@
+# unified_intelligent_service.py - 修复JSON解析问题
 import os
 import json
 import re
@@ -309,16 +310,23 @@ BFS (BRANDED FINANCIAL):
         state["stage"] = new_stage
         
         # 生成响应
-        if new_stage == ConversationStage.MVP_COLLECTION:
-            response = await self._handle_mvp_collection(state)
-        elif new_stage == ConversationStage.PREFERENCE_COLLECTION:
-            response = await self._handle_preference_collection(state, wants_lowest_rate)
-        elif new_stage == ConversationStage.PRODUCT_MATCHING:
-            response = await self._handle_product_matching(state, is_adjustment_request)
-        elif new_stage == ConversationStage.RECOMMENDATION:
-            response = await self._handle_recommendation(state, is_adjustment_request)
-        else:
-            response = await self._handle_general_conversation(state)
+        try:
+            if new_stage == ConversationStage.MVP_COLLECTION:
+                response = await self._handle_mvp_collection(state)
+            elif new_stage == ConversationStage.PREFERENCE_COLLECTION:
+                response = await self._handle_preference_collection(state, wants_lowest_rate)
+            elif new_stage == ConversationStage.PRODUCT_MATCHING:
+                response = await self._handle_product_matching(state, is_adjustment_request)
+            elif new_stage == ConversationStage.RECOMMENDATION:
+                response = await self._handle_recommendation(state, is_adjustment_request)
+            else:
+                response = await self._handle_general_conversation(state)
+        except Exception as e:
+            print(f"❌ Error in stage handling: {e}")
+            response = {
+                "message": "I'm having some trouble processing your request. Let me ask you a simple question to get back on track: What type of loan are you looking for?",
+                "recommendations": []
+            }
         
         # 添加助手回复到历史
         state["conversation_history"].append({"role": "assistant", "content": response["message"]})
@@ -404,7 +412,7 @@ BFS (BRANDED FINANCIAL):
    - 处理用户的完整回答，提取所有相关信息
    - 识别隐含信息和业务逻辑
 
-返回有效JSON格式：
+返回纯JSON格式，不包含任何额外文字：
 {
     "loan_type": "consumer" or "commercial" or null,
     "asset_type": "primary" or "secondary" or "tertiary" or "motor_vehicle" or null,
@@ -425,7 +433,7 @@ BFS (BRANDED FINANCIAL):
     "purchase_price": number or null
 }
 
-重要：只提取明确提到的信息，不确定的字段设为null。优先理解语义，灵活处理各种表达方式。"""
+重要：只返回JSON，不包含任何解释文字。"""
 
             headers = {
                 "x-api-key": self.anthropic_api_key,
@@ -450,16 +458,16 @@ BFS (BRANDED FINANCIAL):
                     result = response.json()
                     ai_response = result['content'][0]['text']
                     
-                    # 清理和解析JSON
-                    clean_response = ai_response.strip()
-                    if clean_response.startswith('```json'):
-                        clean_response = clean_response[7:-3]
-                    elif clean_response.startswith('```'):
-                        clean_response = clean_response[3:-3]
+                    # 🔧 强化JSON清理
+                    clean_response = self._robust_json_cleaning(ai_response)
                     
-                    extracted_data = json.loads(clean_response)
-                    print(f"✅ Claude extraction successful: {extracted_data}")
-                    return extracted_data
+                    if clean_response:
+                        extracted_data = json.loads(clean_response)
+                        print(f"✅ Claude extraction successful: {extracted_data}")
+                        return extracted_data
+                    else:
+                        print("❌ Could not extract valid JSON from Claude response")
+                        return self._enhanced_rule_based_extraction(conversation_history)
                     
                 else:
                     print(f"❌ Anthropic API error: {response.status_code} - {response.text}")
@@ -472,6 +480,53 @@ BFS (BRANDED FINANCIAL):
         except Exception as e:
             print(f"❌ Claude extraction failed: {e}")
             return self._enhanced_rule_based_extraction(conversation_history)
+
+    def _robust_json_cleaning(self, ai_response: str) -> str:
+        """🔧 强化的JSON清理方法"""
+        try:
+            # 移除常见的标记
+            clean_response = ai_response.strip()
+            
+            # 移除markdown代码块标记
+            if clean_response.startswith('```json'):
+                clean_response = clean_response[7:]
+            elif clean_response.startswith('```'):
+                clean_response = clean_response[3:]
+            
+            if clean_response.endswith('```'):
+                clean_response = clean_response[:-3]
+            
+            # 查找第一个{和最后一个}
+            start_idx = clean_response.find('{')
+            end_idx = clean_response.rfind('}')
+            
+            if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
+                clean_response = clean_response[start_idx:end_idx+1]
+                
+                # 验证JSON格式
+                json.loads(clean_response)
+                return clean_response
+            else:
+                return None
+                
+        except json.JSONDecodeError:
+            print(f"🔧 JSON cleaning failed, trying alternative approach")
+            
+            # 尝试正则表达式提取JSON
+            json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+            matches = re.findall(json_pattern, ai_response, re.DOTALL)
+            
+            for match in matches:
+                try:
+                    json.loads(match)
+                    return match
+                except json.JSONDecodeError:
+                    continue
+            
+            return None
+        except Exception as e:
+            print(f"🔧 JSON cleaning error: {e}")
+            return None
 
     def _enhanced_rule_based_extraction(self, conversation_history: List[Dict]) -> Dict[str, Any]:
         """🔧 修复和增强的规则后备提取方法"""
@@ -844,7 +899,7 @@ BFS (BRANDED FINANCIAL):
                 unique_recommendations.append(rec)
                 seen.add(key)
         
-        # 只保留最新2个，并正确标记
+        # 只保留最新的2个，并正确标记
         state["last_recommendations"] = unique_recommendations[:2]
         if len(state["last_recommendations"]) > 1:
             state["last_recommendations"][0]["recommendation_status"] = "current"
@@ -985,7 +1040,7 @@ BFS (BRANDED FINANCIAL):
         return message
 
     async def _ai_product_matching(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
-        """增强的产品匹配方法 - 包含完整产品信息"""
+        """🔧 修复JSON解析问题的产品匹配方法"""
         
         print(f"🎯 Starting enhanced AI product matching...")
         print(f"📊 Customer profile: loan_type={profile.loan_type}, asset_type={profile.asset_type}")
@@ -1012,8 +1067,8 @@ Customer Profile:
             # 获取结构化产品信息
             condensed_products = self._get_structured_product_info()
 
-            # 增强的系统提示 - 要求完整产品信息
-            system_prompt = f"""Find the best loan product match for this customer.
+            # 🔧 修复的系统提示 - 确保只返回纯JSON
+            system_prompt = f"""Find the best loan product match for this customer. Return ONLY valid JSON without any additional text.
 
 CUSTOMER PROFILE:
 {profile_summary}
@@ -1021,7 +1076,7 @@ CUSTOMER PROFILE:
 PRODUCT DATABASE:
 {condensed_products}
 
-Return ONLY a JSON object with COMPLETE information:
+Return ONLY this JSON structure:
 {{
     "lender_name": "RAF",
     "product_name": "Vehicle Finance Premium",
@@ -1032,7 +1087,6 @@ Return ONLY a JSON object with COMPLETE information:
     "loan_term_options": "12-60 months",
     "requirements_met": true,
     "documentation_type": "Low Doc",
-    
     "detailed_requirements": {{
         "minimum_credit_score": "600",
         "abn_years_required": "2+",
@@ -1041,19 +1095,16 @@ Return ONLY a JSON object with COMPLETE information:
         "deposit_required": "0% (asset-backed)",
         "asset_age_limit": "25 years at end-of-term"
     }},
-    
     "fees_breakdown": {{
         "establishment_fee": "$495",
         "monthly_account_fee": "$4.95",
         "private_sale_surcharge": "$695",
         "brokerage_cap": "5.5%"
     }},
-    
     "rate_conditions": {{
         "rate_loadings": "+2% private sale, +2% classic car",
         "balloon_options": "Up to 50% (36m), 45% (48m), 40% (60m)"
     }},
-    
     "documentation_requirements": [
         "Application and privacy consent",
         "Asset and liability statement",
@@ -1061,10 +1112,7 @@ Return ONLY a JSON object with COMPLETE information:
     ]
 }}
 
-IMPORTANT: 
-- comparison_rate = base_rate + fees impact (typically +0.2% to +0.5%)
-- monthly_payment calculated for ${profile.desired_loan_amount or 50000} over 60 months
-- Include ALL eligibility requirements, fees, and conditions"""
+CRITICAL: Return ONLY valid JSON. No explanatory text."""
 
             headers = {
                 "x-api-key": self.anthropic_api_key,
@@ -1074,11 +1122,11 @@ IMPORTANT:
 
             payload = {
                 "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 1500,
+                "max_tokens": 1200,
                 "temperature": 0.1,
                 "system": system_prompt,
                 "messages": [
-                    {"role": "user", "content": "Find the best loan product for this customer with complete details."}
+                    {"role": "user", "content": "Find the best loan product for this customer. Return only JSON."}
                 ]
             }
 
@@ -1095,32 +1143,25 @@ IMPORTANT:
                     
                     print(f"🤖 Claude raw response (first 300 chars): {ai_response[:300]}...")
                     
-                    # 强健的JSON清理和解析
-                    clean_response = ai_response.strip()
+                    # 🔧 使用强化的JSON清理方法
+                    clean_response = self._robust_json_cleaning(ai_response)
                     
-                    # 移除各种可能的标记
-                    markers_to_remove = ['```json', '```', '`']
-                    for marker in markers_to_remove:
-                        if clean_response.startswith(marker):
-                            clean_response = clean_response[len(marker):]
-                        if clean_response.endswith(marker):
-                            clean_response = clean_response[:-len(marker)]
-                    
-                    clean_response = clean_response.strip()
-                    print(f"🧹 Cleaned response (first 200 chars): {clean_response[:200]}...")
-                    
-                    try:
-                        recommendation = json.loads(clean_response)
-                        print(f"✅ Successfully parsed enhanced recommendation: {recommendation.get('lender_name', 'Unknown')}")
-                        print(f"📋 Product: {recommendation.get('product_name', 'Unknown')}")
-                        print(f"💰 Base Rate: {recommendation.get('base_rate', 'Unknown')}%")
-                        print(f"💳 Comparison Rate: {recommendation.get('comparison_rate', 'Unknown')}%")
-                        print(f"💵 Monthly Payment: ${recommendation.get('monthly_payment', 'Unknown')}")
-                        return [recommendation]
-                        
-                    except json.JSONDecodeError as e:
-                        print(f"❌ JSON parsing failed: {e}")
-                        print(f"📝 Failed content: {clean_response}")
+                    if clean_response:
+                        try:
+                            recommendation = json.loads(clean_response)
+                            print(f"✅ Successfully parsed enhanced recommendation: {recommendation.get('lender_name', 'Unknown')}")
+                            print(f"📋 Product: {recommendation.get('product_name', 'Unknown')}")
+                            print(f"💰 Base Rate: {recommendation.get('base_rate', 'Unknown')}%")
+                            print(f"💳 Comparison Rate: {recommendation.get('comparison_rate', 'Unknown')}%")
+                            return [recommendation]
+                            
+                        except json.JSONDecodeError as e:
+                            print(f"❌ JSON parsing still failed: {e}")
+                            print(f"📝 Clean content: {clean_response}")
+                            print("🔄 Using comprehensive fallback recommendation...")
+                            return [self._create_comprehensive_fallback_recommendation(profile)]
+                    else:
+                        print("❌ Could not extract valid JSON from Claude response")
                         print("🔄 Using comprehensive fallback recommendation...")
                         return [self._create_comprehensive_fallback_recommendation(profile)]
                 
