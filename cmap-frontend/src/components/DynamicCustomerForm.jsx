@@ -218,12 +218,19 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
 
     // 🔧 增强否定语句处理
     const negative_abn_patterns = [
-      r"no\s+abn", r"don't\s+have\s+abn", r"without\s+abn", 
-      r"no\s+abn\s+and\s+gst", r"no\s+abn.*gst"
+      /no\s+abn/i,
+      /don't\s+have\s+abn/i,
+      /without\s+abn/i,
+      /no\s+abn\s+and\s+gst/i,
+      /no\s+abn.*gst/i
     ];
+    
     const negative_gst_patterns = [
-      r"no\s+gst", r"don't\s+have\s+gst", r"not\s+registered\s+for\s+gst",
-      r"no\s+abn\s+and\s+gst", r"no.*gst.*years"
+      /no\s+gst/i,
+      /don't\s+have\s+gst/i,
+      /not\s+registered\s+for\s+gst/i,
+      /no\s+abn\s+and\s+gst/i,
+      /no.*gst.*years/i
     ];
     
     for (const pattern of negative_abn_patterns) {
