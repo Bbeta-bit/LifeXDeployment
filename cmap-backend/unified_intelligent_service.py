@@ -132,45 +132,45 @@ class UnifiedIntelligentService:
         
     
         
-    def _load_all_product_docs(self) -> Dict[str, str]:
-        """加载所有lender的产品文档"""
-        docs = {}
-        lender_files = {
-            "Angle": "Angle.md",
-            "BFS": "BFS.md", 
-            "FCAU": "FCAU.md",
-            "RAF": "RAF.md"
-        }
-        
-        for lender, filename in lender_files.items():
-            try:
-                possible_paths = [
-                    filename,
-                    f"docs/{filename}",
-                    f"documents/{filename}",
-                    f"../docs/{filename}"
-                ]
-                
-                for file_path in possible_paths:
-                    if os.path.exists(file_path):
-                        with open(file_path, 'r', encoding='utf-8') as file:
-                            content = file.read()
-                            # 限制文档长度以节省tokens
-                            docs[lender] = content[:1500] + "..." if len(content) > 1500 else content
-                            print(f"✅ Loaded {lender} products from {file_path}")
-                        break
-                else:
-                    print(f"⚠️ {lender} product file not found: {filename}")
-                    docs[lender] = f"{lender} products (documentation not available)"
-                    
-            except FileNotFoundError:
+def _load_all_product_docs(self) -> Dict[str, str]:
+    """🔧 移除Token限制，加载完整产品文档"""
+    docs = {}
+    lender_files = {
+        "Angle": "Angle.md",
+        "BFS": "BFS.md", 
+        "FCAU": "FCAU.md",
+        "RAF": "RAF.md"
+    }
+    
+    for lender, filename in lender_files.items():
+        try:
+            possible_paths = [
+                filename,
+                f"docs/{filename}",
+                f"documents/{filename}",
+                f"../docs/{filename}"
+            ]
+            
+            for file_path in possible_paths:
+                if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8') as file:
+                        content = file.read()
+                        # 🔧 移除长度限制，加载完整文档
+                        docs[lender] = content
+                        print(f"✅ Loaded {lender} products from {file_path} (full content: {len(content)} chars)")
+                    break
+            else:
                 print(f"⚠️ {lender} product file not found: {filename}")
                 docs[lender] = f"{lender} products (documentation not available)"
-            except Exception as e:
-                print(f"❌ Error loading {lender}: {e}")
-                docs[lender] = f"{lender} products (error loading documentation)"
-        
-        return docs
+                
+        except FileNotFoundError:
+            print(f"⚠️ {lender} product file not found: {filename}")
+            docs[lender] = f"{lender} products (documentation not available)"
+        except Exception as e:
+            print(f"❌ Error loading {lender}: {e}")
+            docs[lender] = f"{lender} products (error loading documentation)"
+    
+    return docs
 
     def _get_required_mvp_fields(self, profile: CustomerProfile) -> List[str]:
         """根据资产类型获取需要问的MVP字段"""
@@ -528,166 +528,184 @@ BFS (BRANDED FINANCIAL):
             print(f"🔧 JSON cleaning error: {e}")
             return None
 
-    def _enhanced_rule_based_extraction(self, conversation_history: List[Dict]) -> Dict[str, Any]:
-        """🔧 修复和增强的规则后备提取方法"""
-        conversation_text = " ".join([msg.get("content", "") for msg in conversation_history]).lower()
-        
-        extracted = {}
-        
-        # 🔧 1. 增强否定语句处理
-        negative_abn_patterns = [
-            r"no\s+abn", r"don't\s+have\s+abn", r"without\s+abn", 
-            r"no\s+abn\s+and\s+gst", r"no\s+abn.*gst"
-        ]
-        negative_gst_patterns = [
-            r"no\s+gst", r"don't\s+have\s+gst", r"not\s+registered\s+for\s+gst",
-            r"no\s+abn\s+and\s+gst", r"no.*gst.*years"
-        ]
-        
-        for pattern in negative_abn_patterns:
+def _enhanced_rule_based_extraction(self, conversation_history: List[Dict]) -> Dict[str, Any]:
+    """🔧 修复和增强的规则后备提取方法"""
+    conversation_text = " ".join([msg.get("content", "") for msg in conversation_history]).lower()
+    
+    extracted = {}
+    
+    # 🔧 1. 增强否定语句处理
+    negative_abn_patterns = [
+        r"no\s+abn", r"don't\s+have\s+abn", r"without\s+abn", 
+        r"no\s+abn\s+and\s+gst", r"no\s+abn.*gst"
+    ]
+    negative_gst_patterns = [
+        r"no\s+gst", r"don't\s+have\s+gst", r"not\s+registered\s+for\s+gst",
+        r"no\s+abn\s+and\s+gst", r"no.*gst.*years"
+    ]
+    
+    for pattern in negative_abn_patterns:
+        if re.search(pattern, conversation_text):
+            extracted["ABN_years"] = 0
+            break
+            
+    for pattern in negative_gst_patterns:
+        if re.search(pattern, conversation_text):
+            extracted["GST_years"] = 0
+            break
+    
+    # 🔧 2. 增强业务结构识别
+    business_structure_patterns = {
+        "sole_trader": [r"sole\s*trader", r"self\s*employed", r"individual\s*business"],
+        "company": [r"company", r"corporation", r"pty\s*ltd", r"limited"],
+        "trust": [r"trust", r"family\s*trust", r"discretionary\s*trust"],
+        "partnership": [r"partnership", r"partners", r"joint\s*business"]
+    }
+    
+    for structure, patterns in business_structure_patterns.items():
+        for pattern in patterns:
             if re.search(pattern, conversation_text):
-                extracted["ABN_years"] = 0
+                extracted["business_structure"] = structure
                 break
-                
-        for pattern in negative_gst_patterns:
+        if "business_structure" in extracted:
+            break
+    
+    # 🔧 3. 增强贷款类型识别
+    if any(word in conversation_text for word in ["business", "company", "commercial"]):
+        extracted["loan_type"] = "commercial"
+    elif any(word in conversation_text for word in ["personal", "consumer", "private"]):
+        extracted["loan_type"] = "consumer"
+    
+    # 🔧 4. 增强资产类型识别
+    if any(word in conversation_text for word in ["car", "vehicle", "truck", "van", "motorcycle"]):
+        extracted["asset_type"] = "motor_vehicle"
+    elif any(word in conversation_text for word in ["equipment", "machinery", "primary"]):
+        extracted["asset_type"] = "primary"
+    
+    # 🔧 5. 增强房产状态识别
+    property_owner_patterns = [
+        r"own\s+property", r"property\s+owner", r"have\s+property", 
+        r"property\s+backed", r"own\s+a\s+house"
+    ]
+    property_non_owner_patterns = [
+        r"no\s+property", r"don't\s+own", r"rent", r"renting",
+        r"non.property", r"without\s+property"
+    ]
+    
+    for pattern in property_owner_patterns:
+        if re.search(pattern, conversation_text):
+            extracted["property_status"] = "property_owner"
+            break
+    
+    if "property_status" not in extracted:
+        for pattern in property_non_owner_patterns:
             if re.search(pattern, conversation_text):
-                extracted["GST_years"] = 0
+                extracted["property_status"] = "non_property_owner"
                 break
-        
-        # 🔧 2. 增强业务结构识别
-        business_structure_patterns = {
-            "sole_trader": [r"sole\s*trader", r"self\s*employed", r"individual\s*business"],
-            "company": [r"company", r"corporation", r"pty\s*ltd", r"limited"],
-            "trust": [r"trust", r"family\s*trust", r"discretionary\s*trust"],
-            "partnership": [r"partnership", r"partners", r"joint\s*business"]
-        }
-        
-        for structure, patterns in business_structure_patterns.items():
-            for pattern in patterns:
-                if re.search(pattern, conversation_text):
-                    extracted["business_structure"] = structure
-                    break
-            if "business_structure" in extracted:
+    
+    # 🔧 6. 修复并增强数值提取
+    
+    # ABN年数 - 增强模式
+    abn_patterns = [
+        r"(\d+)\s*years?\s*abn", r"abn.*?(\d+)\s*years?", 
+        r"(\d+)\s*years?.*?abn", r"abn\s*for\s*(\d+)\s*years?"
+    ]
+    for pattern in abn_patterns:
+        match = re.search(pattern, conversation_text)
+        if match and "ABN_years" not in extracted:  # 不覆盖否定语句的结果
+            years = int(match.group(1))
+            if 0 <= years <= 50:
+                extracted["ABN_years"] = years
+            break
+    
+    # GST年数 - 增强模式
+    gst_patterns = [
+        r"(\d+)\s*years?\s*gst", r"gst.*?(\d+)\s*years?",
+        r"(\d+)\s*years?.*?gst", r"gst\s*for\s*(\d+)\s*years?"
+    ]
+    for pattern in gst_patterns:
+        match = re.search(pattern, conversation_text)
+        if match and "GST_years" not in extracted:  # 不覆盖否定语句的结果
+            years = int(match.group(1))
+            if 0 <= years <= 50:
+                extracted["GST_years"] = years
+            break
+    
+    # 🔧 7. **修复信用分数提取** - 扩展模式
+    credit_patterns = [
+        r"credit\s*score\s*(?:is\s*)?(\d{3,4})",
+        r"score\s*(?:is\s*)?(\d{3,4})",
+        r"(\d{3,4})\s*credit",
+        r"my\s*score\s*(?:is\s*)?(\d{3,4})",
+        r"(\d{3,4})\s*score",
+        # 🔧 新增模式 - 处理 "credit score 958" 这种格式
+        r"credit\s*score\s*(\d{3,4})",
+        r"score\s*(\d{3,4})",
+        # 🔧 处理逗号分隔的情况
+        r"(?:^|,|\s)(?:credit\s*score\s*)?(\d{3,4})(?=\s*,|\s|$)"
+    ]
+    for pattern in credit_patterns:
+        match = re.search(pattern, conversation_text)
+        if match:
+            score = int(match.group(1))
+            if 300 <= score <= 900:
+                extracted["credit_score"] = score
+                print(f"✅ Credit score extracted: {score}")
                 break
-        
-        # 🔧 3. 增强贷款类型识别
-        if any(word in conversation_text for word in ["business", "company", "commercial"]):
-            extracted["loan_type"] = "commercial"
-        elif any(word in conversation_text for word in ["personal", "consumer", "private"]):
-            extracted["loan_type"] = "consumer"
-        
-        # 🔧 4. 增强资产类型识别
-        if any(word in conversation_text for word in ["car", "vehicle", "truck", "van", "motorcycle"]):
-            extracted["asset_type"] = "motor_vehicle"
-        elif any(word in conversation_text for word in ["equipment", "machinery", "primary"]):
-            extracted["asset_type"] = "primary"
-        
-        # 🔧 5. 增强房产状态识别
-        property_owner_patterns = [
-            r"own\s+property", r"property\s+owner", r"have\s+property", 
-            r"property\s+backed", r"own\s+a\s+house"
-        ]
-        property_non_owner_patterns = [
-            r"no\s+property", r"don't\s+own", r"rent", r"renting",
-            r"non.property", r"without\s+property"
-        ]
-        
-        for pattern in property_owner_patterns:
-            if re.search(pattern, conversation_text):
-                extracted["property_status"] = "property_owner"
+    
+    # 车辆条件
+    if "new" in conversation_text and "vehicle" in conversation_text:
+        extracted["vehicle_condition"] = "new"
+    elif "used" in conversation_text and "vehicle" in conversation_text:
+        extracted["vehicle_condition"] = "used"
+    
+    # 车辆类型
+    if any(word in conversation_text for word in ["model y", "tesla", "passenger car"]):
+        extracted["vehicle_type"] = "passenger_car"
+    elif any(word in conversation_text for word in ["truck", "heavy vehicle"]):
+        extracted["vehicle_type"] = "light_truck"
+    elif any(word in conversation_text for word in ["van", "ute"]):
+        extracted["vehicle_type"] = "van_ute"
+    
+    # 🔧 8. **修复贷款金额提取** - 扩展和优化模式
+    amount_patterns = [
+        # 原有模式
+        r"loan\s*amount.*?(\d+(?:,\d{3})*(?:\.\d{2})?)",
+        r"borrow.*?(\d+(?:,\d{3})*)",
+        r"need.*?(\d+(?:,\d{3})*)",
+        r"want.*?(\d+(?:,\d{3})*)",
+        r"looking\s*for.*?(\d+(?:,\d{3})*)",
+        r"[\$]\s*(\d+(?:,\d{3})*(?:\.\d{2})?)",
+        r"(\d+)k\s*(?:loan|dollar)",
+        r"(\d+)\s*thousand",
+        # 🔧 新增模式 - 处理 "loan 20000" 这种格式
+        r"loan\s+(\d+(?:,\d{3})*)",
+        r"loan\s*(\d{1,10})",
+        # 🔧 处理逗号分隔的数字
+        r"(?:^|,|\s)(?:loan\s*)?(\d{4,8})(?=\s*,|\s|$)",
+        # 🔧 处理更多格式
+        r"finance\s*(\d+(?:,\d{3})*)",
+        r"amount\s*(\d+(?:,\d{3})*)"
+    ]
+    
+    for pattern in amount_patterns:
+        match = re.search(pattern, conversation_text)
+        if match:
+            try:
+                amount_str = match.group(1).replace(',', '')
+                if 'k' in match.group(0) or 'thousand' in match.group(0):
+                    amount = float(amount_str) * 1000
+                else:
+                    amount = float(amount_str)
+                if 1000 <= amount <= 10000000:
+                    extracted["desired_loan_amount"] = amount
+                    print(f"✅ Loan amount extracted: {amount}")
                 break
-        
-        if "property_status" not in extracted:
-            for pattern in property_non_owner_patterns:
-                if re.search(pattern, conversation_text):
-                    extracted["property_status"] = "non_property_owner"
-                    break
-        
-        # 🔧 6. 增强数值提取
-        # ABN年数 - 增强模式
-        abn_patterns = [
-            r"(\d+)\s*years?\s*abn", r"abn.*?(\d+)\s*years?", 
-            r"(\d+)\s*years?.*?abn", r"abn\s*for\s*(\d+)\s*years?"
-        ]
-        for pattern in abn_patterns:
-            match = re.search(pattern, conversation_text)
-            if match and "ABN_years" not in extracted:  # 不覆盖否定语句的结果
-                years = int(match.group(1))
-                if 0 <= years <= 50:
-                    extracted["ABN_years"] = years
-                break
-        
-        # GST年数 - 增强模式
-        gst_patterns = [
-            r"(\d+)\s*years?\s*gst", r"gst.*?(\d+)\s*years?",
-            r"(\d+)\s*years?.*?gst", r"gst\s*for\s*(\d+)\s*years?"
-        ]
-        for pattern in gst_patterns:
-            match = re.search(pattern, conversation_text)
-            if match and "GST_years" not in extracted:  # 不覆盖否定语句的结果
-                years = int(match.group(1))
-                if 0 <= years <= 50:
-                    extracted["GST_years"] = years
-                break
-        
-        # 🔧 7. 增强信用分数提取
-        credit_patterns = [
-            r"credit\s*score\s*(?:is\s*)?(\d{3,4})",
-            r"score\s*(?:is\s*)?(\d{3,4})",
-            r"(\d{3,4})\s*credit",
-            r"my\s*score\s*(?:is\s*)?(\d{3,4})",
-            r"(\d{3,4})\s*score"
-        ]
-        for pattern in credit_patterns:
-            match = re.search(pattern, conversation_text)
-            if match:
-                score = int(match.group(1))
-                if 300 <= score <= 900:
-                    extracted["credit_score"] = score
-                break
-        
-        # 车辆条件
-        if "new" in conversation_text and "vehicle" in conversation_text:
-            extracted["vehicle_condition"] = "new"
-        elif "used" in conversation_text and "vehicle" in conversation_text:
-            extracted["vehicle_condition"] = "used"
-        
-        # 车辆类型
-        if any(word in conversation_text for word in ["model y", "tesla", "passenger car"]):
-            extracted["vehicle_type"] = "passenger_car"
-        elif any(word in conversation_text for word in ["truck", "heavy vehicle"]):
-            extracted["vehicle_type"] = "light_truck"
-        elif any(word in conversation_text for word in ["van", "ute"]):
-            extracted["vehicle_type"] = "van_ute"
-        
-        # 🔧 8. 增强贷款金额提取
-        amount_patterns = [
-            r"loan\s*amount.*?(\d+(?:,\d{3})*(?:\.\d{2})?)",
-            r"borrow.*?(\d+(?:,\d{3})*)",
-            r"need.*?(\d+(?:,\d{3})*)",
-            r"want.*?(\d+(?:,\d{3})*)",
-            r"looking\s*for.*?(\d+(?:,\d{3})*)",
-            r"[\$]\s*(\d+(?:,\d{3})*(?:\.\d{2})?)",
-            r"(\d+)k\s*(?:loan|dollar)",
-            r"(\d+)\s*thousand"
-        ]
-        for pattern in amount_patterns:
-            match = re.search(pattern, conversation_text)
-            if match:
-                try:
-                    amount_str = match.group(1).replace(',', '')
-                    if 'k' in match.group(0) or 'thousand' in match.group(0):
-                        amount = float(amount_str) * 1000
-                    else:
-                        amount = float(amount_str)
-                    if 1000 <= amount <= 10000000:
-                        extracted["desired_loan_amount"] = amount
-                    break
-                except (ValueError, IndexError):
-                    continue
-        
-        print(f"🔍 Enhanced rule-based extraction result: {extracted}")  # 调试信息
-        return extracted
+            except (ValueError, IndexError):
+                continue
+    
+    print(f"🔍 Enhanced extraction result: {extracted}")  # 调试信息
+    return extracted
 
     def _determine_conversation_stage(self, state: Dict, wants_lowest_rate: bool = False) -> ConversationStage:
         """确定对话阶段 - MVP是必问问题，4轮后强制推荐"""
@@ -1027,139 +1045,184 @@ BFS (BRANDED FINANCIAL):
         return message
 
     async def _ai_product_matching(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
-        """🔧 修复JSON解析问题的产品匹配方法"""
+        """🔧 增强的AI产品匹配 - 完整信息提取"""
+    
+    print(f"🎯 Starting enhanced AI product matching with full documentation...")
+    print(f"📊 Customer profile: loan_type={profile.loan_type}, asset_type={profile.asset_type}")
+    print(f"📊 Property status={profile.property_status}, credit_score={profile.credit_score}")
+    print(f"📊 ABN years={profile.ABN_years}, GST years={profile.GST_years}")
+    
+    try:
+        # 检查API密钥
+        if not self.anthropic_api_key:
+            print("⚠️ No Anthropic API key - using fallback recommendation")
+            return [self._create_comprehensive_fallback_recommendation(profile)]
         
-        print(f"🎯 Starting enhanced AI product matching...")
-        print(f"📊 Customer profile: loan_type={profile.loan_type}, asset_type={profile.asset_type}")
-        print(f"📊 Property status={profile.property_status}, credit_score={profile.credit_score}")
-        print(f"📊 ABN years={profile.ABN_years}, GST years={profile.GST_years}")
-        
-        try:
-            # 检查API密钥
-            if not self.anthropic_api_key:
-                print("⚠️ No Anthropic API key - using fallback recommendation")
-                return [self._create_comprehensive_fallback_recommendation(profile)]
-            
-            # 简化的客户档案描述
-            profile_summary = f"""
-Customer Profile:
-- Type: {profile.loan_type or 'business'} loan for {profile.asset_type or 'vehicle'}
+        # 构建详细的客户档案
+        profile_summary = f"""
+Customer Profile Analysis:
+- Loan Type: {profile.loan_type or 'business'} loan for {profile.asset_type or 'vehicle'}
 - Property Owner: {profile.property_status or 'unknown'}
 - Credit Score: {profile.credit_score or 'not specified'}
-- ABN: {profile.ABN_years or 0} years, GST: {profile.GST_years or 0} years
-- Loan Amount: ${profile.desired_loan_amount or 'not specified'}
-- Vehicle: {profile.vehicle_make or ''} {profile.vehicle_model or ''}
+- Business: ABN {profile.ABN_years or 0} years, GST {profile.GST_years or 0} years
+- Desired Loan Amount: ${profile.desired_loan_amount or 'not specified'}
+- Vehicle Details: {profile.vehicle_make or ''} {profile.vehicle_model or ''} ({profile.vehicle_condition or 'condition not specified'})
+- Business Structure: {profile.business_structure or 'not specified'}
 """
 
-            # 获取结构化产品信息
-            condensed_products = self._get_structured_product_info()
+        # 🔧 使用完整的产品文档，而不是简化版本
+        full_product_docs = ""
+        for lender, content in self.product_docs.items():
+            full_product_docs += f"\n\n=== {lender} PRODUCTS ===\n{content}\n"
 
-            # 🔧 修复的系统提示 - 确保只返回纯JSON
-            system_prompt = f"""Find the best loan product match for this customer. Return ONLY valid JSON without any additional text.
+        # 🔧 增强的系统提示 - 要求详细的业务分析
+        system_prompt = f"""You are an expert loan product analyst. Analyze the customer profile against the complete product documentation and provide a comprehensive recommendation with detailed business logic.
 
 CUSTOMER PROFILE:
 {profile_summary}
 
-PRODUCT DATABASE:
-{condensed_products}
+COMPLETE PRODUCT DOCUMENTATION:
+{full_product_docs}
 
-Return ONLY this JSON structure:
+ANALYSIS REQUIREMENTS:
+1. Match customer profile against ALL product eligibility criteria
+2. Identify the BEST product with detailed reasoning
+3. Extract ALL relevant requirements, conditions, and business rules
+4. Include specific eligibility assessments for this customer
+5. Provide complete fee structures and rate conditions
+6. Include detailed documentation requirements
+7. Explain any special conditions or rate loadings that apply
+
+Return ONLY valid JSON with this enhanced structure:
 {{
     "lender_name": "RAF",
-    "product_name": "Vehicle Finance Premium",
+    "product_name": "Vehicle Finance Premium (0-3 years)",
     "base_rate": 6.89,
     "comparison_rate": 7.12,
     "monthly_payment": 1250,
     "max_loan_amount": "$450,000",
-    "loan_term_options": "12-60 months",
+    "loan_term_options": "12-84 months",
     "requirements_met": true,
-    "documentation_type": "Low Doc",
+    "documentation_type": "Low Doc / Lite Doc / Full Doc",
+    
     "detailed_requirements": {{
-        "minimum_credit_score": "600",
-        "abn_years_required": "2+",
-        "gst_years_required": "1+", 
-        "property_ownership": "Required",
-        "deposit_required": "0% (asset-backed)",
-        "asset_age_limit": "25 years at end-of-term"
+        "minimum_credit_score": "600 (Premium tier customers)",
+        "abn_years_required": "2+ years (Premium tier requires 4+ years for asset-backed)",
+        "gst_years_required": "1+ years (Premium tier requires 2+ years)", 
+        "property_ownership": "Required for Premium tier (spouse property accepted)",
+        "deposit_required": "0% if asset-backed and property owner, 10% if non-asset-backed",
+        "business_structure": "Any structure accepted (Company/Trust preferred for Premium)",
+        "asset_age_limit": "Vehicle max 25 years at end-of-term (3 years for Premium rates)",
+        "asset_type_restrictions": "Motor vehicles, specific equipment types as per lender guidelines",
+        "income_verification": "Payslips, tax returns, financial statements as per doc level",
+        "special_conditions": "Tesla qualifies as premium asset, electric vehicle incentives may apply"
     }},
+    
     "fees_breakdown": {{
-        "establishment_fee": "$495",
+        "establishment_fee": "$495 (dealer sale) / $745 (private sale)",
         "monthly_account_fee": "$4.95",
-        "private_sale_surcharge": "$695",
-        "brokerage_cap": "5.5%"
+        "private_sale_surcharge": "$695 (if applicable)",
+        "ppsr_fee": "At cost (if asset value > $50,000)",
+        "brokerage_cap": "5.5% without rate impact, higher rates apply above this",
+        "early_termination_fee": "Varies by lender - see terms",
+        "variation_fee": "$60 per variation (if applicable)"
     }},
+    
     "rate_conditions": {{
-        "rate_loadings": "+2% private sale, +2% classic car",
-        "balloon_options": "Up to 50% (36m), 45% (48m), 40% (60m)"
+        "base_rate_explanation": "6.89% for new vehicles 0-3 years (Premium tier)",
+        "premium_tier_discount": "-0.50% discount for Premium tier qualification",
+        "rate_loadings": "+2% private sale, +2% classic car, +2% prime mover, +2% asset age >16 years",
+        "balloon_options": "Up to 50% (36m), 45% (48m), 40% (60m) for motor vehicles",
+        "maximum_cumulative_loading": "4% total rate loading cap",
+        "special_asset_rates": "Electric vehicles may qualify for preferential rates"
     }},
+    
     "documentation_requirements": [
-        "Application and privacy consent",
-        "Asset and liability statement",
-        "90-day bank statements (if Full Doc)"
-    ]
+        "Completed application form and privacy consent",
+        "Asset and liability statement (all customers)",
+        "12-month ATO portal history (Lite-Doc and above)",
+        "Latest 2 BAS statements (Lite-Doc and above)",
+        "90-day bank statements (Full-Doc mandatory, Lite-Doc on request)",
+        "Recent financial statements or tax returns (Full-Doc)",
+        "Property ownership verification (rates notice, utility bill)",
+        "Vehicle purchase contract or invoice",
+        "Driver's license (all applicants)",
+        "Insurance certificate of currency (if NAF > $100,000)",
+        "Asset inspection report (private sales mandatory)"
+    ],
+    
+    "business_logic_assessment": {{
+        "customer_tier_qualification": "Premium tier - meets property and credit requirements",
+        "asset_assessment": "Tesla Model Y qualifies as premium electric vehicle",
+        "risk_factors": "New customer, electric vehicle specialty financing",
+        "competitive_advantages": "Low rate, premium lender, electric vehicle expertise",
+        "potential_issues": "None identified based on provided profile",
+        "alternative_products": "Consider Flexicommercial if business structure changes"
+    }}
 }}
 
-CRITICAL: Return ONLY valid JSON. No explanatory text."""
+CRITICAL: Return ONLY the JSON object. No explanatory text."""
 
-            headers = {
-                "x-api-key": self.anthropic_api_key,
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01"
-            }
+        headers = {
+            "x-api-key": self.anthropic_api_key,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
 
-            payload = {
-                "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 1200,
-                "temperature": 0.1,
-                "system": system_prompt,
-                "messages": [
-                    {"role": "user", "content": "Find the best loan product for this customer. Return only JSON."}
-                ]
-            }
+        payload = {
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 2000,  # 🔧 增加token限制以容纳更多信息
+            "temperature": 0.1,
+            "system": system_prompt,
+            "messages": [
+                {"role": "user", "content": "Analyze this customer profile and provide the most suitable loan product recommendation with complete business analysis."}
+            ]
+        }
 
-            print(f"📤 Sending enhanced request to Claude API...")
+        print(f"📤 Sending enhanced request to Claude API...")
 
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(self.api_url, headers=headers, json=payload)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(self.api_url, headers=headers, json=payload)
+            
+            print(f"📥 Claude API response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                ai_response = result['content'][0]['text']
                 
-                print(f"📥 Claude API response status: {response.status_code}")
+                print(f"🤖 Claude raw response (first 500 chars): {ai_response[:500]}...")
                 
-                if response.status_code == 200:
-                    result = response.json()
-                    ai_response = result['content'][0]['text']
-                    
-                    print(f"🤖 Claude raw response (first 300 chars): {ai_response[:300]}...")
-                    
-                    # 🔧 使用强化的JSON清理方法
-                    clean_response = self._robust_json_cleaning(ai_response)
-                    
-                    if clean_response:
-                        try:
-                            recommendation = json.loads(clean_response)
-                            print(f"✅ Successfully parsed enhanced recommendation: {recommendation.get('lender_name', 'Unknown')}")
-                            print(f"📋 Product: {recommendation.get('product_name', 'Unknown')}")
-                            print(f"💰 Base Rate: {recommendation.get('base_rate', 'Unknown')}%")
-                            print(f"💳 Comparison Rate: {recommendation.get('comparison_rate', 'Unknown')}%")
-                            return [recommendation]
-                            
-                        except json.JSONDecodeError as e:
-                            print(f"❌ JSON parsing still failed: {e}")
-                            print(f"📝 Clean content: {clean_response}")
-                            print("🔄 Using comprehensive fallback recommendation...")
-                            return [self._create_comprehensive_fallback_recommendation(profile)]
-                    else:
-                        print("❌ Could not extract valid JSON from Claude response")
+                # 🔧 使用强化的JSON清理方法
+                clean_response = self._robust_json_cleaning(ai_response)
+                
+                if clean_response:
+                    try:
+                        recommendation = json.loads(clean_response)
+                        print(f"✅ Successfully parsed enhanced recommendation: {recommendation.get('lender_name', 'Unknown')}")
+                        print(f"📋 Product: {recommendation.get('product_name', 'Unknown')}")
+                        print(f"💰 Base Rate: {recommendation.get('base_rate', 'Unknown')}%")
+                        print(f"💳 Comparison Rate: {recommendation.get('comparison_rate', 'Unknown')}%")
+                        print(f"📄 Documentation Requirements: {len(recommendation.get('documentation_requirements', []))} items")
+                        print(f"🔍 Business Logic: {recommendation.get('business_logic_assessment', {}).get('customer_tier_qualification', 'Not specified')}")
+                        return [recommendation]
+                        
+                    except json.JSONDecodeError as e:
+                        print(f"❌ JSON parsing still failed: {e}")
+                        print(f"📝 Clean content: {clean_response}")
                         print("🔄 Using comprehensive fallback recommendation...")
                         return [self._create_comprehensive_fallback_recommendation(profile)]
-                
                 else:
-                    print(f"❌ API error: {response.status_code} - {response.text[:200]}")
+                    print("❌ Could not extract valid JSON from Claude response")
+                    print("🔄 Using comprehensive fallback recommendation...")
                     return [self._create_comprehensive_fallback_recommendation(profile)]
-                    
-        except Exception as e:
-            print(f"❌ Unexpected error in enhanced AI product matching: {e}")
-            return [self._create_comprehensive_fallback_recommendation(profile)]
-
+            
+            else:
+                print(f"❌ API error: {response.status_code} - {response.text[:200]}")
+                return [self._create_comprehensive_fallback_recommendation(profile)]
+                
+    except Exception as e:
+        print(f"❌ Unexpected error in enhanced AI product matching: {e}")
+        return [self._create_comprehensive_fallback_recommendation(profile)]
     def _create_comprehensive_fallback_recommendation(self, profile: CustomerProfile) -> Dict[str, Any]:
         """创建包含完整信息的智能后备推荐"""
         
