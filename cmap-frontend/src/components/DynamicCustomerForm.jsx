@@ -387,7 +387,7 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
     }
   }, [conversationHistory, extractInfoFromConversation, autoExtractEnabled]);
 
-  // 🔧 PDF下载功能
+  // 🔧 修复PDF下载功能 - 确保生成真正的PDF
   const downloadInformation = () => {
     // 检查是否有信息可下载
     const hasCustomerInfo = Object.values(customerInfo).some(value => 
@@ -400,244 +400,330 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
       return;
     }
 
-    // 🔧 使用现代浏览器的打印功能生成PDF
-    const printWindow = window.open('', '_blank');
-    
-    // 创建PDF内容
-    let content = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>LIFEX Loan Information Summary</title>
-        <style>
-            body { 
-                font-family: Arial, sans-serif; 
-                max-width: 800px; 
-                margin: 0 auto; 
-                padding: 20px; 
-                line-height: 1.6;
-                color: #333;
-            }
-            .header { 
-                text-align: center; 
-                border-bottom: 2px solid #333; 
-                padding-bottom: 20px; 
-                margin-bottom: 30px; 
-            }
-            .section { 
-                margin-bottom: 25px; 
-                border: 1px solid #ddd; 
-                padding: 15px; 
-                border-radius: 5px;
-            }
-            .section h3 { 
-                color: #2563eb; 
-                border-bottom: 1px solid #e5e7eb; 
-                padding-bottom: 8px; 
-                margin-top: 0;
-            }
-            .info-grid { 
-                display: grid; 
-                grid-template-columns: 1fr 1fr; 
-                gap: 10px; 
-                margin-top: 10px;
-            }
-            .info-item { 
-                display: flex; 
-                justify-content: space-between; 
-                padding: 5px 0; 
-                border-bottom: 1px dotted #ccc;
-            }
-            .label { 
-                font-weight: bold; 
-                color: #555;
-            }
-            .recommendation { 
-                border: 2px solid #10b981; 
-                background-color: #f0fdf4; 
-                margin-bottom: 20px;
-            }
-            .disclaimer { 
-                background-color: #fef3c7; 
-                border: 1px solid #f59e0b; 
-                padding: 15px; 
-                border-radius: 5px; 
-                font-size: 12px; 
-                margin-top: 30px;
-            }
-            @media print {
-                body { margin: 0; padding: 15px; }
-                .no-print { display: none; }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <h1>LIFEX LOAN INFORMATION SUMMARY</h1>
-            <p>Generated: ${new Date().toLocaleString()}</p>
-        </div>
-    `;
+    // 🔧 创建PDF内容的HTML
+    const createPdfContent = () => {
+      let content = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <meta charset="UTF-8">
+          <title>LIFEX Loan Information Summary</title>
+          <style>
+              @page {
+                  size: A4;
+                  margin: 20mm;
+              }
+              body { 
+                  font-family: 'Arial', sans-serif; 
+                  max-width: 210mm; 
+                  margin: 0 auto; 
+                  padding: 0; 
+                  line-height: 1.6;
+                  color: #333;
+                  font-size: 12px;
+              }
+              .header { 
+                  text-align: center; 
+                  border-bottom: 3px solid #2563eb; 
+                  padding-bottom: 20px; 
+                  margin-bottom: 30px; 
+                  page-break-inside: avoid;
+              }
+              .header h1 {
+                  color: #2563eb;
+                  font-size: 24px;
+                  margin-bottom: 10px;
+              }
+              .section { 
+                  margin-bottom: 25px; 
+                  border: 1px solid #ddd; 
+                  padding: 15px; 
+                  border-radius: 8px;
+                  page-break-inside: avoid;
+              }
+              .section h3 { 
+                  color: #2563eb; 
+                  border-bottom: 2px solid #e5e7eb; 
+                  padding-bottom: 8px; 
+                  margin-top: 0;
+                  font-size: 16px;
+              }
+              .section h4 {
+                  color: #374151;
+                  margin-top: 15px;
+                  margin-bottom: 8px;
+                  font-size: 14px;
+              }
+              .info-grid { 
+                  display: grid; 
+                  grid-template-columns: 1fr 1fr; 
+                  gap: 8px; 
+                  margin-top: 10px;
+              }
+              .info-item { 
+                  display: flex; 
+                  justify-content: space-between; 
+                  padding: 6px 0; 
+                  border-bottom: 1px dotted #ccc;
+                  font-size: 11px;
+              }
+              .label { 
+                  font-weight: bold; 
+                  color: #555;
+                  flex: 1;
+              }
+              .value {
+                  flex: 1;
+                  text-align: right;
+                  color: #333;
+              }
+              .recommendation { 
+                  border: 2px solid #10b981; 
+                  background-color: #f0fdf4; 
+                  margin-bottom: 20px;
+                  page-break-inside: avoid;
+              }
+              .recommendation h4 {
+                  color: #10b981;
+                  font-size: 14px;
+                  margin-bottom: 10px;
+              }
+              .rate-highlight {
+                  font-size: 18px;
+                  font-weight: bold;
+                  color: #2563eb;
+                  text-align: center;
+                  padding: 10px;
+                  background-color: #eff6ff;
+                  border-radius: 6px;
+                  margin: 10px 0;
+              }
+              .disclaimer { 
+                  background-color: #fef3c7; 
+                  border: 2px solid #f59e0b; 
+                  padding: 15px; 
+                  border-radius: 8px; 
+                  font-size: 10px; 
+                  margin-top: 30px;
+                  page-break-inside: avoid;
+              }
+              .disclaimer h4 {
+                  color: #92400e;
+                  margin-top: 0;
+              }
+              .footer {
+                  text-align: center;
+                  margin-top: 20px;
+                  padding-top: 20px;
+                  border-top: 1px solid #e5e7eb;
+                  font-size: 10px;
+                  color: #6b7280;
+              }
+              @media print {
+                  body { margin: 0; }
+                  .no-print { display: none !important; }
+                  .page-break { page-break-before: always; }
+              }
+          </style>
+      </head>
+      <body>
+          <div class="header">
+              <h1>🏦 LIFEX LOAN INFORMATION SUMMARY</h1>
+              <p><strong>Generated:</strong> ${new Date().toLocaleDateString('en-AU', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })}</p>
+          </div>
+      `;
 
-    // 客户信息部分
-    if (hasCustomerInfo) {
-      content += `<div class="section">
-        <h3>Customer Information</h3>`;
-      
-      const sections = {
-        'Basic Details': ['loan_type', 'asset_type', 'property_status'],
-        'Financial Information': ['credit_score', 'desired_loan_amount'],
-        'Business Information': ['ABN_years', 'GST_years', 'business_structure'],
-        'Vehicle Information': ['vehicle_type', 'vehicle_condition', 'vehicle_make', 'vehicle_model', 'vehicle_year'],
-        'Preferences': ['interest_rate_ceiling', 'monthly_budget', 'loan_term_preference']
-      };
+      // 客户信息部分
+      if (hasCustomerInfo) {
+        content += `<div class="section">
+          <h3>📋 Customer Information</h3>`;
+        
+        const sections = {
+          'Basic Details': ['loan_type', 'asset_type', 'property_status'],
+          'Financial Information': ['credit_score', 'desired_loan_amount'],
+          'Business Information': ['ABN_years', 'GST_years', 'business_structure'],
+          'Vehicle Information': ['vehicle_type', 'vehicle_condition', 'vehicle_make', 'vehicle_model', 'vehicle_year'],
+          'Preferences': ['interest_rate_ceiling', 'monthly_budget', 'loan_term_preference']
+        };
 
-      Object.entries(sections).forEach(([sectionName, fields]) => {
-        const sectionData = fields.filter(field => {
-          const config = fieldConfig[field];
-          const hasValue = customerInfo[field];
-          const isVisible = !config?.conditional || config.conditional(customerInfo);
-          return hasValue && isVisible;
+        Object.entries(sections).forEach(([sectionName, fields]) => {
+          const sectionData = fields.filter(field => {
+            const config = fieldConfig[field];
+            const hasValue = customerInfo[field];
+            const isVisible = !config?.conditional || config.conditional(customerInfo);
+            return hasValue && isVisible;
+          });
+
+          if (sectionData.length > 0) {
+            content += `<h4>${sectionName}</h4><div class="info-grid">`;
+            sectionData.forEach(field => {
+              const config = fieldConfig[field];
+              const value = customerInfo[field];
+              const displayValue = config?.type === 'select' 
+                ? config.options?.find(opt => opt.value === value)?.label || value
+                : typeof value === 'number' ? value.toLocaleString() : value;
+              content += `
+                <div class="info-item">
+                  <span class="label">${config?.label || field}:</span>
+                  <span class="value">${displayValue}</span>
+                </div>`;
+            });
+            content += `</div>`;
+          }
         });
 
-        if (sectionData.length > 0) {
-          content += `<h4>${sectionName}</h4><div class="info-grid">`;
-          sectionData.forEach(field => {
-            const config = fieldConfig[field];
-            const value = customerInfo[field];
-            const displayValue = config?.type === 'select' 
-              ? config.options?.find(opt => opt.value === value)?.label || value
-              : value;
-            content += `
-              <div class="info-item">
-                <span class="label">${config?.label || field}:</span>
-                <span>${displayValue}</span>
-              </div>`;
-          });
-          content += `</div>`;
-        }
-      });
-
-      // 自动提取的字段
-      if (customerInfo.extracted_fields.length > 0) {
-        content += `
-          <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
-            <strong>Auto-extracted Fields:</strong> ${customerInfo.extracted_fields.length}<br>
-            <strong>Last Updated:</strong> ${customerInfo.last_updated ? new Date(customerInfo.last_updated).toLocaleString() : 'N/A'}
-          </div>`;
-      }
-      
-      content += `</div>`;
-    }
-
-    // 推荐产品部分
-    if (hasRecommendations) {
-      content += `<div class="section">
-        <h3>Product Recommendations</h3>`;
-      
-      recommendations.forEach((rec, index) => {
-        content += `
-          <div class="recommendation">
-            <h4>${index + 1}. ${rec.lender_name} - ${rec.product_name}</h4>
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="label">Interest Rate:</span>
-                <span>${rec.base_rate}% p.a.</span>
-              </div>`;
-              
-        if (rec.comparison_rate) {
+        // 自动提取的字段
+        if (customerInfo.extracted_fields.length > 0) {
           content += `
-              <div class="info-item">
-                <span class="label">Comparison Rate:</span>
-                <span>${rec.comparison_rate}% p.a.</span>
-              </div>`;
-        }
-        
-        if (rec.monthly_payment) {
-          content += `
-              <div class="info-item">
-                <span class="label">Monthly Payment:</span>
-                <span>${rec.monthly_payment}</span>
-              </div>`;
-        }
-        
-        content += `
-              <div class="info-item">
-                <span class="label">Max Loan Amount:</span>
-                <span>${rec.max_loan_amount}</span>
-              </div>
-              <div class="info-item">
-                <span class="label">Loan Terms:</span>
-                <span>${rec.loan_term_options}</span>
-              </div>
-              <div class="info-item">
-                <span class="label">Documentation:</span>
-                <span>${rec.documentation_type}</span>
-              </div>
-              <div class="info-item">
-                <span class="label">Requirements Met:</span>
-                <span>${rec.requirements_met ? 'Yes' : 'Review Required'}</span>
-              </div>
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd; font-size: 10px;">
+              <strong>📊 Auto-extracted Fields:</strong> ${customerInfo.extracted_fields.length}<br>
+              <strong>📅 Last Updated:</strong> ${customerInfo.last_updated ? new Date(customerInfo.last_updated).toLocaleString() : 'N/A'}
             </div>`;
-
-        // 详细要求
-        if (rec.detailed_requirements) {
-          content += `<h5>Eligibility Requirements:</h5><div class="info-grid">`;
-          Object.entries(rec.detailed_requirements).forEach(([key, value]) => {
-            content += `
-              <div class="info-item">
-                <span class="label">${key.replace(/_/g, ' ')}:</span>
-                <span>${value}</span>
-              </div>`;
-          });
-          content += `</div>`;
         }
-
-        // 费用
-        if (rec.fees_breakdown) {
-          content += `<h5>Fees:</h5><div class="info-grid">`;
-          Object.entries(rec.fees_breakdown).forEach(([key, value]) => {
-            content += `
-              <div class="info-item">
-                <span class="label">${key.replace(/_/g, ' ')}:</span>
-                <span>${value}</span>
-              </div>`;
-          });
-          content += `</div>`;
-        }
-
+        
         content += `</div>`;
-      });
-      
-      content += `</div>`;
+      }
+
+      // 推荐产品部分
+      if (hasRecommendations) {
+        content += `<div class="section page-break">
+          <h3>🎯 Product Recommendations</h3>`;
+        
+        recommendations.forEach((rec, index) => {
+          content += `
+            <div class="recommendation">
+              <h4>${index + 1}. ${rec.lender_name} - ${rec.product_name}</h4>
+              
+              <div class="rate-highlight">
+                Interest Rate: ${rec.base_rate}% p.a.
+                ${rec.comparison_rate ? ` | Comparison Rate: ${rec.comparison_rate}% p.a.` : ''}
+              </div>
+              
+              <div class="info-grid">`;
+                
+          if (rec.monthly_payment) {
+            content += `
+                <div class="info-item">
+                  <span class="label">Monthly Payment:</span>
+                  <span class="value">${rec.monthly_payment}</span>
+                </div>`;
+          }
+          
+          content += `
+                <div class="info-item">
+                  <span class="label">Max Loan Amount:</span>
+                  <span class="value">${rec.max_loan_amount || 'Not specified'}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">Loan Terms:</span>
+                  <span class="value">${rec.loan_term_options || 'Not specified'}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">Documentation:</span>
+                  <span class="value">${rec.documentation_type || 'Standard'}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">Requirements Met:</span>
+                  <span class="value">${rec.requirements_met ? '✅ Yes' : '⚠️ Review Required'}</span>
+                </div>
+              </div>`;
+
+          // 详细要求
+          if (rec.detailed_requirements && Object.keys(rec.detailed_requirements).length > 0) {
+            content += `<h5 style="margin-top: 15px; color: #374151;">Eligibility Requirements:</h5><div class="info-grid">`;
+            Object.entries(rec.detailed_requirements).forEach(([key, value]) => {
+              content += `
+                <div class="info-item">
+                  <span class="label">${key.replace(/_/g, ' ')}:</span>
+                  <span class="value">${value}</span>
+                </div>`;
+            });
+            content += `</div>`;
+          }
+
+          // 费用
+          if (rec.fees_breakdown && Object.keys(rec.fees_breakdown).length > 0) {
+            content += `<h5 style="margin-top: 15px; color: #374151;">Fees:</h5><div class="info-grid">`;
+            Object.entries(rec.fees_breakdown).forEach(([key, value]) => {
+              content += `
+                <div class="info-item">
+                  <span class="label">${key.replace(/_/g, ' ')}:</span>
+                  <span class="value">${value}</span>
+                </div>`;
+            });
+            content += `</div>`;
+          }
+
+          content += `</div>`;
+        });
+        
+        content += `</div>`;
+      }
+
+      // 免责声明
+      content += `
+          <div class="disclaimer">
+              <h4>⚠️ IMPORTANT DISCLAIMER</h4>
+              <p><strong>This summary is for informational purposes only.</strong> Interest rates, terms, and conditions are subject to change and final approval by the lender. All calculations are estimates and actual payments may vary based on individual circumstances.</p>
+              <p><strong>Next Steps:</strong> Please contact the recommended lender(s) directly to discuss your specific requirements and obtain formal loan approval.</p>
+              <p><strong>Professional Advice:</strong> Consider consulting with a qualified financial advisor for personalized guidance.</p>
+          </div>
+          
+          <div class="footer">
+              <p><strong>Generated by LIFEX Loan Agent System</strong> | Document ID: ${Date.now()}</p>
+              <p>This document contains confidential financial information. Please handle accordingly.</p>
+          </div>
+          
+          <div class="no-print" style="text-align: center; margin-top: 30px; padding: 20px; background: #f9fafb; border-radius: 8px;">
+              <button onclick="window.print()" style="background: #2563eb; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; margin-right: 10px;">
+                  📄 Generate PDF
+              </button>
+              <button onclick="window.close()" style="background: #6b7280; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px;">
+                  ❌ Close
+              </button>
+              <p style="margin-top: 10px; font-size: 12px; color: #6b7280;">
+                  Click "Generate PDF" to save this document as a PDF file to your device.
+              </p>
+          </div>
+      </body>
+      </html>`;
+
+      return content;
+    };
+
+    // 🔧 打开新窗口并设置正确的PDF生成
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    
+    if (!printWindow) {
+      alert('Pop-up blocked. Please allow pop-ups for this site and try again.');
+      return;
     }
 
-    // 免责声明
-    content += `
-        <div class="disclaimer">
-            <h4>DISCLAIMER:</h4>
-            <p>This summary is for informational purposes only. Interest rates, terms, and conditions are subject to change and final approval by the lender. All calculations are estimates and actual payments may vary. Please consult with a financial advisor for personalized advice.</p>
-            <p><strong>Generated by LIFEX Loan Agent System</strong></p>
-        </div>
-        
-        <div class="no-print" style="text-align: center; margin-top: 30px;">
-            <button onclick="window.print()" style="background: #2563eb; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">
-                Generate PDF
-            </button>
-            <button onclick="window.close()" style="background: #6b7280; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-left: 10px;">
-                Close
-            </button>
-        </div>
-    </body>
-    </html>`;
-
-    printWindow.document.write(content);
+    const pdfContent = createPdfContent();
+    printWindow.document.write(pdfContent);
     printWindow.document.close();
 
-    // 🔧 自动触发打印对话框
-    setTimeout(() => {
-      printWindow.focus();
-      printWindow.print();
-    }, 500);
+    // 🔧 等待内容加载完毕后自动触发打印
+    printWindow.onload = () => {
+      setTimeout(() => {
+        printWindow.focus();
+        printWindow.print();
+      }, 1000);
+    };
+
+    // 🔧 监听打印完成事件（用户完成或取消打印后）
+    printWindow.onafterprint = () => {
+      setTimeout(() => {
+        printWindow.close();
+      }, 1000);
+    };
   };
 
   // Clear form
@@ -803,7 +889,7 @@ const DynamicCustomerForm = ({ conversationHistory, onFormUpdate, initialData, r
                 : 'Download PDF Summary'
               }
             >
-              Download PDF
+              📄 Download PDF
             </button>
           </div>
         </div>

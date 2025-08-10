@@ -118,11 +118,11 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
             )}
             <div className="flex justify-between">
               <span>Max Loan Amount:</span>
-              <span className="font-medium">{product.max_loan_amount}</span>
+              <span className="font-medium">{product.max_loan_amount || 'Not specified'}</span>
             </div>
             <div className="flex justify-between">
               <span>Loan Terms:</span>
-              <span className="font-medium">{product.loan_term_options}</span>
+              <span className="font-medium">{product.loan_term_options || 'Not specified'}</span>
             </div>
             {product.monthly_payment && (
               <div className="flex justify-between">
@@ -141,7 +141,7 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span>Doc Type:</span>
-              <span className="font-medium">{product.documentation_type}</span>
+              <span className="font-medium">{product.documentation_type || 'Standard'}</span>
             </div>
             <div className="flex justify-between items-center">
               <span>Requirements Met:</span>
@@ -163,8 +163,8 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
         </div>
       </div>
 
-      {/* 🔧 详细要求 - 完整显示 */}
-      {product.detailed_requirements && (
+      {/* 🔧 详细要求 - 完整显示，安全处理数据 */}
+      {product.detailed_requirements && Object.keys(product.detailed_requirements).length > 0 && (
         <div className="bg-gray-50 p-4 rounded-lg">
           <h4 className="font-semibold text-gray-800 mb-3 flex items-center">
             <CheckCircle className="w-4 h-4 mr-1" />
@@ -174,15 +174,15 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
             {Object.entries(product.detailed_requirements).map(([key, value]) => (
               <div key={key} className="flex justify-between items-start">
                 <span className="text-gray-600 capitalize font-medium">{key.replace(/_/g, ' ')}:</span>
-                <span className="text-right ml-2 text-gray-800">{value}</span>
+                <span className="text-right ml-2 text-gray-800">{String(value)}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* 🔧 费用明细 - 完整显示 */}
-      {product.fees_breakdown && (
+      {/* 🔧 费用明细 - 完整显示，安全处理数据 */}
+      {product.fees_breakdown && Object.keys(product.fees_breakdown).length > 0 && (
         <div className="bg-yellow-50 p-4 rounded-lg">
           <h4 className="font-semibold text-yellow-800 mb-3 flex items-center">
             <DollarSign className="w-4 h-4 mr-1" />
@@ -192,15 +192,15 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
             {Object.entries(product.fees_breakdown).map(([key, value]) => (
               <div key={key} className="flex justify-between">
                 <span className="text-gray-600 capitalize">{key.replace(/_/g, ' ')}:</span>
-                <span className="font-medium text-gray-800">{value}</span>
+                <span className="font-medium text-gray-800">{String(value)}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* 🔧 利率条件 - 完整显示 */}
-      {product.rate_conditions && (
+      {/* 🔧 利率条件 - 完整显示，安全处理数据 */}
+      {product.rate_conditions && Object.keys(product.rate_conditions).length > 0 && (
         <div className="bg-purple-50 p-4 rounded-lg">
           <h4 className="font-semibold text-purple-800 mb-3 flex items-center">
             <Info className="w-4 h-4 mr-1" />
@@ -210,15 +210,15 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
             {Object.entries(product.rate_conditions).map(([key, value]) => (
               <div key={key}>
                 <span className="text-gray-600 capitalize font-medium">{key.replace(/_/g, ' ')}:</span>
-                <span className="ml-2 text-gray-800">{value}</span>
+                <span className="ml-2 text-gray-800">{String(value)}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* 🔧 文档要求 - 完整显示 */}
-      {product.documentation_requirements && (
+      {/* 🔧 文档要求 - 完整显示，安全处理数据 */}
+      {product.documentation_requirements && Array.isArray(product.documentation_requirements) && product.documentation_requirements.length > 0 && (
         <div className="bg-indigo-50 p-4 rounded-lg">
           <h4 className="font-semibold text-indigo-800 mb-3 flex items-center">
             <FileText className="w-4 h-4 mr-1" />
@@ -226,7 +226,7 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
           </h4>
           <ul className="list-disc list-inside space-y-1 text-sm">
             {product.documentation_requirements.map((req, index) => (
-              <li key={index} className="text-gray-700">{req}</li>
+              <li key={index} className="text-gray-700">{String(req)}</li>
             ))}
           </ul>
         </div>
@@ -311,33 +311,33 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm">
               <div className="flex flex-col">
                 <span className="text-gray-600 mb-1">Max Loan:</span>
-                <span className="font-medium">{product.max_loan_amount}</span>
+                <span className="font-medium">{product.max_loan_amount || 'Not specified'}</span>
               </div>
               <div className="flex flex-col">
                 <span className="text-gray-600 mb-1">Terms:</span>
-                <span className="font-medium">{product.loan_term_options}</span>
+                <span className="font-medium">{product.loan_term_options || 'Not specified'}</span>
               </div>
               <div className="flex flex-col">
                 <span className="text-gray-600 mb-1">Monthly Payment:</span>
                 <span className="font-medium text-green-600">
-                  {product.monthly_payment ? `${product.monthly_payment}` : 'See details'}
+                  {product.monthly_payment ? `$${product.monthly_payment}` : 'See details'}
                 </span>
               </div>
               <div className="flex flex-col">
                 <span className="text-gray-600 mb-1">Documentation:</span>
-                <span className="font-medium">{product.documentation_type}</span>
+                <span className="font-medium">{product.documentation_type || 'Standard'}</span>
               </div>
             </div>
 
             {/* 🔧 快速要求检查 */}
-            {product.detailed_requirements && (
+            {product.detailed_requirements && Object.keys(product.detailed_requirements).length > 0 && (
               <div className="mb-4 p-3 bg-gray-50 rounded border">
                 <h5 className="font-medium text-gray-800 mb-2 text-sm">Key Requirements:</h5>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                   {Object.entries(product.detailed_requirements).slice(0, 4).map(([key, value]) => (
                     <div key={key} className="flex justify-between">
                       <span className="text-gray-600">{key.replace(/_/g, ' ')}:</span>
-                      <span className="font-medium">{value}</span>
+                      <span className="font-medium">{String(value)}</span>
                     </div>
                   ))}
                 </div>

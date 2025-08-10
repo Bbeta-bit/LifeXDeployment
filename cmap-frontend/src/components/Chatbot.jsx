@@ -290,51 +290,15 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
 
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: '#fef7e8' }}>
-      {/* Header - 🔧 移除连接状态显示 */}
+      {/* Header - 🔧 简化，只显示标题 */}
       <div className="px-6 py-4 border-b" style={{ backgroundColor: '#fef7e8' }}>
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold text-gray-800">Agent X</h1>
-          {/* 🔧 仅在开发环境显示调试信息 */}
-          {process.env.NODE_ENV === 'development' && (
-            <div className="flex items-center space-x-3">
-              {/* 连接状态指示器 */}
-              <div className={`flex items-center text-xs ${
-                isConnected ? 'text-green-600' : 'text-red-600'
-              }`}>
-                <div className={`w-2 h-2 rounded-full mr-2 ${
-                  isConnected ? 'bg-green-500' : 'bg-red-500'
-                }`}></div>
-                {isConnected ? 'Connected' : 'Disconnected'}
-              </div>
-              
-              {/* Form data同步状态 */}
-              {customerInfo && Object.keys(customerInfo).length > 0 && (
-                <div className="text-xs text-blue-600 flex items-center">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
-                  Form synced
-                </div>
-              )}
-            </div>
-          )}
+          {/* 🔧 完全移除连接状态和调试信息显示 */}
         </div>
       </div>
 
-      {/* 🔧 只有在真正无法连接时才显示连接错误 */}
-      {!isConnected && connectionError && (
-        <div className="px-6 py-3 bg-red-50 border-b border-red-200">
-          <div className="flex items-center justify-between">
-            <div className="text-red-700 text-sm">
-              ⚠️ Connection issue. Please check your internet and try again.
-            </div>
-            <button
-              onClick={handleReconnect}
-              className="text-xs bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
+      {/* 🔧 完全移除连接错误提示，让用户体验更流畅 */}
 
       {/* 聊天区域 */}
       <div
@@ -374,7 +338,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         )}
       </div>
 
-      {/* 输入区域 - 🔧 简化状态提示 */}
+      {/* 输入区域 - 🔧 简化状态提示，移除底部说明文字 */}
       <div className="px-6 py-4 border-t" style={{ backgroundColor: '#fef7e8' }}>
         <div className="relative">
           <textarea
@@ -384,19 +348,18 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
             onKeyDown={handleKeyDown}
             rows={1}
             placeholder={
-              !isConnected ? "Connecting..." :
               isLoading ? "Sending..." :
               "Tell me about your loan requirements..."
             }
             className="w-full resize-none rounded-xl border border-gray-300 px-5 py-4 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-            disabled={isLoading || !sessionId || !isConnected}
+            disabled={isLoading || !sessionId}
             style={{ minHeight: '56px', maxHeight: '120px' }}
           />
           <button
             onClick={handleSend}
-            disabled={isLoading || !input.trim() || !sessionId || !isConnected}
+            disabled={isLoading || !input.trim() || !sessionId}
             className={`absolute right-3 bottom-3 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              isLoading || !input.trim() || !sessionId || !isConnected
+              isLoading || !input.trim() || !sessionId
                 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
@@ -405,7 +368,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           </button>
         </div>
         
-        {/* 🔧 移除状态信息，保持简洁 */}
+        {/* 🔧 完全移除底部的状态信息和提示文字 */}
       </div>
     </div>
   );
