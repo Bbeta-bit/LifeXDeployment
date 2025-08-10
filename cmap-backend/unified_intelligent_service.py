@@ -990,7 +990,7 @@ CRITICAL: Return ONLY the JSON object. No explanatory text."""
             "stage": state["stage"].value,
             "customer_profile": self._serialize_customer_profile(state["customer_profile"]),
             "round_count": state["round_count"]
-        } 使用安全的API密钥加载
+        } #使用安全的API密钥加载
         self.anthropic_api_key = get_api_key()
         self.api_url = "https://api.anthropic.com/v1/messages"
         
