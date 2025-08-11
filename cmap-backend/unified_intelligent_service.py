@@ -1,4 +1,4 @@
-# unified_intelligent_service.py - 修复语法错误
+# unified_intelligent_service.py - 修复信息提取和产品信息完整性
 import os
 import json
 import re
@@ -208,43 +208,13 @@ class UnifiedIntelligentService:
         comparison_rate = base_rate + fee_rate_impact
         return round(comparison_rate, 2)
 
-    def _get_structured_product_info(self) -> str:
-        """从产品文档中提取结构化信息"""
-        
-        structured_info = """
-ANGLE FINANCE:
-- Primary01: 7.99%, 10yr max, Property+Credit 500-650, ABN>=2yr, GST>=1yr, Max $100k Low Doc
-- Primary04: 10.05%, 10yr max, Non-property, ABN>=2yr, GST>=1yr
-- Secondary01: 10.45%, 10yr max, Property+Credit 500-650
-- Tertiary01: 12.95%, 10yr max, Property+Credit 500-650
-- Startup01: 12.95%, Property, ABN<2yr, Full Doc only
-- A+ Rate: 6.99%, Property+Company/Trust/Partnership, ABN>=4yr, GST>=2yr, Credit 550+
-- Fees: Setup $540/$700, Monthly $4.95, Brokerage up to 8%
-
-RAF (RESIMAC):
-- Vehicle 0-3yr: 6.89%, Property Premium tier, Credit 600+, Max $450k
-- Vehicle >3yr: 7.49%, Property Premium tier, Credit 600+, Max $450k  
-- Equipment Primary: 7.89%, Property Premium, Max $450k
-- Secured Business: 8.99%-9.50%, 1st mortgage, Max $5M, LVR 70%
-- Fees: Setup $495, Monthly $4.95, Private sale +$695, Brokerage 5.5%
-
-FCAU (FLEXICOMMERCIAL):
-- FlexiPremium: 6.85%-7.74%, Company/Trust only, ABN>=4yr, GST>=4yr, Max $500k
-- FlexiCommercial Primary: 8.15%-12.90%, ABN>=4yr, Max $500k single deal
-- FlexiAssist: 15%-18%, Credit 300+, Max $150k, Past defaults accepted
-- Fees: Setup $495/$745, Monthly $4.95, Brokerage 3-6%
-
-BFS (BRANDED FINANCIAL):
-- Prime Commercial: 7.65%-9.80%, ABN holders, Credit 600+ (500 with 20% deposit)
-- Prime Consumer: 8.80%-12.40%, PAYG income, Credit 600+ (500 with 20% deposit)  
-- Plus: 15.98%, Credit 500+, Bank statements mandatory, Max $100k
-- Fees: Setup $490-$650, Monthly $8, Early termination varies
-"""
-        return structured_info
-
     async def process_conversation(self, user_message: str, session_id: str = "default", 
                                  chat_history: List[Dict] = None, current_customer_info: Dict = None) -> Dict[str, Any]:
         """处理对话的主入口函数"""
+        
+        print(f"\n🔄 Processing conversation - Session: {session_id}")
+        print(f"📝 User message: {user_message}")
+        print(f"📊 Current customer info: {current_customer_info}")
         
         # 获取或创建会话状态
         if session_id not in self.conversation_states:
@@ -260,10 +230,10 @@ BFS (BRANDED FINANCIAL):
         state = self.conversation_states[session_id]
         state["round_count"] += 1
         
-        # 同步最新的客户信息（来自DynamicForm的手动修改）
+        # 🔧 修复1：改进客户信息同步逻辑
         if current_customer_info:
+            print(f"🔄 Syncing customer info from frontend...")
             self._sync_customer_info_from_form(state["customer_profile"], current_customer_info)
-            print(f"🔄 Synced customer info from form: {current_customer_info}")
         
         # 重要：使用完整的聊天历史，而不是覆盖
         if chat_history:
@@ -273,20 +243,20 @@ BFS (BRANDED FINANCIAL):
         # 添加当前消息到历史
         state["conversation_history"].append({"role": "user", "content": user_message})
         
-        # 使用完整的对话历史提取信息
-        extracted_info = await self._extract_mvp_and_preferences(state["conversation_history"])
-        print(f"🔍 Extracted info: {extracted_info}")  # 调试信息
+        # 🔧 修复2：增强信息提取，添加详细调试
+        print(f"🔍 Starting information extraction...")
+        extracted_info = await self._extract_mvp_and_preferences_enhanced(state["conversation_history"])
+        print(f"🔍 Extracted info: {extracted_info}")
         
-        # 使用新的优先级更新策略：自动提取 > 手动修改
+        # 🔧 修复3：优化更新策略
         self._update_customer_profile_with_priority(state["customer_profile"], extracted_info, current_customer_info)
-        print(f"📊 Updated profile: {self._serialize_customer_profile(state['customer_profile'])}")  # 调试信息
+        print(f"📊 Updated profile: {self._serialize_customer_profile(state['customer_profile'])}")
         
         # 检查已经有值的字段，自动标记为已问过
         required_mvp_fields = self._get_required_mvp_fields(state["customer_profile"])
         for field in required_mvp_fields:
             if getattr(state["customer_profile"], field) is not None:
                 state["asked_fields"].add(field)
-                print(f"✅ Auto-marked {field} as asked")
         
         # 检查是否是调整要求
         user_message_lower = user_message.lower()
@@ -303,8 +273,8 @@ BFS (BRANDED FINANCIAL):
         
         # 确定对话阶段
         new_stage = self._determine_conversation_stage(state, wants_lowest_rate or is_adjustment_request)
-        print(f"🎯 Current stage: {new_stage}")  # 调试信息
-        print(f"📝 Asked fields: {state['asked_fields']}")  # 调试信息
+        print(f"🎯 Current stage: {new_stage}")
+        print(f"📝 Asked fields: {state['asked_fields']}")
         state["stage"] = new_stage
         
         # 生成响应
@@ -341,11 +311,28 @@ BFS (BRANDED FINANCIAL):
         }
 
     def _sync_customer_info_from_form(self, profile: CustomerProfile, form_info: Dict):
-        """从表单同步客户信息到profile"""
+        """🔧 修复：从表单同步客户信息到profile"""
+        print(f"🔄 Syncing form info: {form_info}")
+        
         for field, value in form_info.items():
-            if hasattr(profile, field) and value is not None and value != '':
-                setattr(profile, field, value)
-                print(f"🔄 Synced from form: {field} = {value}")
+            if hasattr(profile, field):
+                # 处理不同类型的值
+                if value is not None and value != '' and value != 'undefined':
+                    # 类型转换
+                    if field in ['ABN_years', 'GST_years', 'credit_score', 'vehicle_year']:
+                        try:
+                            value = int(value) if value else None
+                        except (ValueError, TypeError):
+                            continue
+                    elif field in ['desired_loan_amount', 'interest_rate_ceiling', 'monthly_budget']:
+                        try:
+                            value = float(value) if value else None
+                        except (ValueError, TypeError):
+                            continue
+                    
+                    if value is not None:
+                        setattr(profile, field, value)
+                        print(f"🔄 Synced from form: {field} = {value}")
 
     def _update_customer_profile_with_priority(self, profile: CustomerProfile, extracted_info: Dict[str, Any], manual_info: Dict = None):
         """使用优先级策略更新客户档案：自动提取 > 手动修改，最新信息 > 历史信息"""
@@ -368,70 +355,74 @@ BFS (BRANDED FINANCIAL):
                 if current_value != value:
                     print(f"🤖 Auto-extracted (priority): {field} = {value} (was: {current_value})")
 
-    async def _extract_mvp_and_preferences(self, conversation_history: List[Dict]) -> Dict[str, Any]:
-        """使用Claude提取MVP信息和偏好，带fallback机制"""
+    async def _extract_mvp_and_preferences_enhanced(self, conversation_history: List[Dict]) -> Dict[str, Any]:
+        """🔧 修复：增强的信息提取方法，改进调试和错误处理"""
+        
+        print(f"🔍 Starting enhanced extraction...")
+        print(f"📊 Conversation history length: {len(conversation_history)}")
+        
+        # 检查对话历史是否有效
+        if not conversation_history:
+            print("⚠️ Empty conversation history")
+            return {}
+        
+        # 打印最近的对话内容用于调试
+        recent_messages = conversation_history[-3:]
+        for i, msg in enumerate(recent_messages):
+            print(f"📝 Recent message {i}: {msg.get('role', 'unknown')}: {msg.get('content', 'empty')[:100]}...")
+        
         try:
             # 检查API密钥
             if not self.anthropic_api_key:
-                print("⚠️ No Anthropic API key - using rule-based extraction")
-                return self._enhanced_rule_based_extraction(conversation_history)
+                print("⚠️ No Anthropic API key - using enhanced rule-based extraction")
+                return self._enhanced_rule_based_extraction_fixed(conversation_history)
             
             conversation_text = "\n".join([
                 f"{msg['role']}: {msg['content']}" for msg in conversation_history[-6:]  # 最近6轮对话
             ])
             
-            # 修复后的Prompt - 重点提高语义理解和否定语句处理
-            system_prompt = """你是专业的客户信息提取助手。从对话中灵活提取客户贷款信息，重点理解语义而非严格匹配格式。
+            print(f"📤 Sending to Claude API...")
+            print(f"📝 Conversation text (first 200 chars): {conversation_text[:200]}...")
+            
+            # 🔧 修复：改进的系统提示，更好的语义理解
+            system_prompt = """你是专业的客户信息提取助手。从对话中准确提取客户贷款信息。
 
-核心提取规则：
-1. **否定语句处理**：
-   - "no ABN" / "don't have ABN" / "no abn and gst years" → ABN_years: 0
+重要规则：
+1. **精确提取**：只提取对话中明确提到的信息
+2. **否定语句处理**：
+   - "no ABN" / "don't have ABN" → ABN_years: 0
    - "no GST" / "not registered for GST" → GST_years: 0
    - "no property" / "don't own property" → property_status: "non_property_owner"
-
-2. **灵活数值识别**：
-   - "credit score 600" / "600 credit" / "score is 600" → credit_score: 600
-   - "$20000" / "20000" / "20k" / "twenty thousand" → desired_loan_amount: 20000
+3. **数值识别**：
+   - "credit score 600" / "600 credit" → credit_score: 600
+   - "$50000" / "50k" / "fifty thousand" → desired_loan_amount: 50000
    - "2 years ABN" / "ABN for 2 years" → ABN_years: 2
+4. **业务理解**：
+   - "business loan" / "commercial" → loan_type: "commercial"
+   - "personal loan" / "consumer" → loan_type: "consumer"
+   - "own property" / "property owner" → property_status: "property_owner"
 
-3. **业务术语理解**：
-   - "sole trader" / "self employed" → business_structure: "sole_trader"
-   - "company" / "pty ltd" → business_structure: "company"
-   - "commercial loan" / "business use" → loan_type: "commercial"
-   - "personal loan" / "personal use" → loan_type: "consumer"
-
-4. **调整要求识别**：
-   - "lower rate" / "better rate" → interest_rate_ceiling: (current_rate - 1)
-   - "higher amount" / "more money" → 提取新的loan amount
-   - "longer term" / "shorter term" → 提取新的loan term
-
-5. **语义理解**：
-   - 理解上下文关系，不仅匹配关键词
-   - 处理用户的完整回答，提取所有相关信息
-   - 识别隐含信息和业务逻辑
-
-返回纯JSON格式，不包含任何额外文字：
+返回格式（纯JSON，无其他文字）：
 {
-    "loan_type": "consumer" or "commercial" or null,
-    "asset_type": "primary" or "secondary" or "tertiary" or "motor_vehicle" or null,
-    "property_status": "property_owner" or "non_property_owner" or null,
-    "ABN_years": number or null,
-    "GST_years": number or null,
-    "credit_score": number or null,
-    "desired_loan_amount": number or null,
-    "loan_term_preference": number or null,
-    "vehicle_type": "passenger_car" or "light_truck" or "van_ute" or "motorcycle" or "heavy_truck" or null,
-    "vehicle_condition": "new" or "demonstrator" or "used" or null,
-    "business_structure": "sole_trader" or "company" or "trust" or "partnership" or null,
-    "interest_rate_ceiling": number or null,
-    "monthly_budget": number or null,
-    "vehicle_make": string or null,
-    "vehicle_model": string or null,
-    "vehicle_year": number or null,
-    "purchase_price": number or null
+    "loan_type": null,
+    "asset_type": null,
+    "property_status": null,
+    "ABN_years": null,
+    "GST_years": null,
+    "credit_score": null,
+    "desired_loan_amount": null,
+    "loan_term_preference": null,
+    "vehicle_type": null,
+    "vehicle_condition": null,
+    "business_structure": null,
+    "interest_rate_ceiling": null,
+    "monthly_budget": null,
+    "vehicle_make": null,
+    "vehicle_model": null,
+    "vehicle_year": null
 }
 
-重要：只返回JSON，不包含任何解释文字。"""
+只返回JSON，不包含解释。"""
 
             headers = {
                 "x-api-key": self.anthropic_api_key,
@@ -441,7 +432,7 @@ BFS (BRANDED FINANCIAL):
 
             payload = {
                 "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 800,
+                "max_tokens": 1000,
                 "temperature": 0.1,
                 "system": system_prompt,
                 "messages": [
@@ -449,15 +440,21 @@ BFS (BRANDED FINANCIAL):
                 ]
             }
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            print(f"📤 Making API request...")
+
+            async with httpx.AsyncClient(timeout=45.0) as client:
                 response = await client.post(self.api_url, headers=headers, json=payload)
+                
+                print(f"📥 API response status: {response.status_code}")
                 
                 if response.status_code == 200:
                     result = response.json()
                     ai_response = result['content'][0]['text']
                     
-                    # 强化JSON清理
-                    clean_response = self._robust_json_cleaning(ai_response)
+                    print(f"🤖 Claude raw response: {ai_response}")
+                    
+                    # 使用增强的JSON清理方法
+                    clean_response = self._robust_json_cleaning_fixed(ai_response)
                     
                     if clean_response:
                         extracted_data = json.loads(clean_response)
@@ -465,23 +462,30 @@ BFS (BRANDED FINANCIAL):
                         return extracted_data
                     else:
                         print("❌ Could not extract valid JSON from Claude response")
-                        return self._enhanced_rule_based_extraction(conversation_history)
+                        print("🔄 Falling back to rule-based extraction...")
+                        return self._enhanced_rule_based_extraction_fixed(conversation_history)
                     
                 else:
-                    print(f"❌ Anthropic API error: {response.status_code} - {response.text}")
-                    return self._enhanced_rule_based_extraction(conversation_history)
+                    print(f"❌ Anthropic API error: {response.status_code}")
+                    if response.text:
+                        print(f"❌ Error details: {response.text[:200]}...")
+                    print("🔄 Falling back to rule-based extraction...")
+                    return self._enhanced_rule_based_extraction_fixed(conversation_history)
                     
         except httpx.TimeoutException:
             print("⏰ Anthropic API timeout - falling back to rule-based extraction")
-            return self._enhanced_rule_based_extraction(conversation_history)
+            return self._enhanced_rule_based_extraction_fixed(conversation_history)
             
         except Exception as e:
             print(f"❌ Claude extraction failed: {e}")
-            return self._enhanced_rule_based_extraction(conversation_history)
+            print("🔄 Falling back to rule-based extraction...")
+            return self._enhanced_rule_based_extraction_fixed(conversation_history)
 
-    def _robust_json_cleaning(self, ai_response: str) -> str:
-        """强化的JSON清理方法"""
+    def _robust_json_cleaning_fixed(self, ai_response: str) -> str:
+        """🔧 修复：强化的JSON清理方法"""
         try:
+            print(f"🧹 Cleaning JSON response...")
+            
             # 移除常见的标记
             clean_response = ai_response.strip()
             
@@ -501,174 +505,171 @@ BFS (BRANDED FINANCIAL):
             if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
                 clean_response = clean_response[start_idx:end_idx+1]
                 
+                print(f"🧹 Cleaned JSON: {clean_response[:100]}...")
+                
                 # 验证JSON格式
-                json.loads(clean_response)
+                test_parse = json.loads(clean_response)
+                print(f"✅ JSON validation successful")
                 return clean_response
             else:
+                print(f"❌ Could not find valid JSON structure")
                 return None
                 
-        except json.JSONDecodeError:
-            print(f"🔧 JSON cleaning failed, trying alternative approach")
+        except json.JSONDecodeError as e:
+            print(f"🔧 JSON cleaning failed: {e}")
             
             # 尝试正则表达式提取JSON
             json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
             matches = re.findall(json_pattern, ai_response, re.DOTALL)
             
-            for match in matches:
+            print(f"🔧 Trying regex extraction, found {len(matches)} potential JSONs...")
+            
+            for i, match in enumerate(matches):
                 try:
-                    json.loads(match)
+                    test_parse = json.loads(match)
+                    print(f"✅ Regex extraction successful (match {i})")
                     return match
                 except json.JSONDecodeError:
+                    print(f"❌ Regex match {i} invalid")
                     continue
             
+            print(f"❌ All regex attempts failed")
             return None
         except Exception as e:
             print(f"🔧 JSON cleaning error: {e}")
             return None
 
-    def _enhanced_rule_based_extraction(self, conversation_history: List[Dict]) -> Dict[str, Any]:
-        """修复和增强的规则后备提取方法"""
-        conversation_text = " ".join([msg.get("content", "") for msg in conversation_history]).lower()
+    def _enhanced_rule_based_extraction_fixed(self, conversation_history: List[Dict]) -> Dict[str, Any]:
+        """🔧 修复：增强的规则后备提取方法"""
+        
+        print(f"🔍 Starting enhanced rule-based extraction...")
+        
+        # 检查输入
+        if not conversation_history:
+            print("⚠️ Empty conversation history in rule extraction")
+            return {}
+        
+        # 获取原始文本和小写文本
+        original_text = " ".join([msg.get("content", "") for msg in conversation_history])
+        conversation_text = original_text.lower()
+        
+        print(f"📝 Processing text (first 200 chars): {original_text[:200]}...")
         
         extracted = {}
         
-        # 1. 增强否定语句处理
-        negative_abn_patterns = [
-            r"no\s+abn", r"don't\s+have\s+abn", r"without\s+abn", 
-            r"no\s+abn\s+and\s+gst", r"no\s+abn.*gst"
-        ]
-        negative_gst_patterns = [
-            r"no\s+gst", r"don't\s+have\s+gst", r"not\s+registered\s+for\s+gst",
-            r"no\s+abn\s+and\s+gst", r"no.*gst.*years"
-        ]
-        
-        for pattern in negative_abn_patterns:
-            if re.search(pattern, conversation_text):
-                extracted["ABN_years"] = 0
-                break
-                
-        for pattern in negative_gst_patterns:
-            if re.search(pattern, conversation_text):
-                extracted["GST_years"] = 0
-                break
-        
-        # 2. 增强业务结构识别
-        business_structure_patterns = {
-            "sole_trader": [r"sole\s*trader", r"self\s*employed", r"individual\s*business"],
-            "company": [r"company", r"corporation", r"pty\s*ltd", r"limited"],
-            "trust": [r"trust", r"family\s*trust", r"discretionary\s*trust"],
-            "partnership": [r"partnership", r"partners", r"joint\s*business"]
+        # 1. 🔧 修复：增强否定语句处理
+        negative_patterns = {
+            "ABN_years": [
+                r"no\s+abn", r"don'?t\s+have\s+abn", r"without\s+abn", 
+                r"no\s+abn\s+and\s+gst", r"no\s+abn.*gst"
+            ],
+            "GST_years": [
+                r"no\s+gst", r"don'?t\s+have\s+gst", r"not\s+registered\s+for\s+gst",
+                r"no\s+abn\s+and\s+gst", r"no.*gst.*years"
+            ]
         }
         
-        for structure, patterns in business_structure_patterns.items():
+        for field, patterns in negative_patterns.items():
             for pattern in patterns:
                 if re.search(pattern, conversation_text):
-                    extracted["business_structure"] = structure
+                    extracted[field] = 0
+                    print(f"🔍 Negative pattern matched for {field}: 0")
                     break
-            if "business_structure" in extracted:
+        
+        # 2. 🔧 修复：增强房产状态识别
+        property_patterns = {
+            "property_owner": [
+                r"own\s+property", r"property\s+owner", r"have\s+property", 
+                r"own\s+a\s+house", r"own\s+a\s+home", r"homeowner",
+                r"property\s+backed", r"own\s+real\s+estate"
+            ],
+            "non_property_owner": [
+                r"no\s+property", r"don'?t\s+own", r"rent", r"renting",
+                r"non.property", r"without\s+property", r"tenant"
+            ]
+        }
+        
+        for status, patterns in property_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, conversation_text):
+                    extracted["property_status"] = status
+                    print(f"🔍 Property status matched: {status}")
+                    break
+            if "property_status" in extracted:
                 break
         
-        # 3. 增强贷款类型识别
-        if any(word in conversation_text for word in ["business", "company", "commercial"]):
+        # 3. 🔧 修复：增强数值提取
+        number_patterns = {
+            "ABN_years": [
+                r"abn.*?(\d+)\s*years?", r"(\d+)\s*years?.*?abn", 
+                r"abn\s*for\s*(\d+)\s*years?", r"(\d+)\s*year.*abn"
+            ],
+            "GST_years": [
+                r"gst.*?(\d+)\s*years?", r"(\d+)\s*years?.*?gst",
+                r"gst\s*for\s*(\d+)\s*years?", r"(\d+)\s*year.*gst"
+            ],
+            "credit_score": [
+                r"credit\s*score\s*(?:is\s*)?(\d{3,4})",
+                r"score\s*(?:is\s*)?(\d{3,4})",
+                r"(\d{3,4})\s*credit",
+                r"my\s*score\s*(?:is\s*)?(\d{3,4})"
+            ]
+        }
+        
+        for field, patterns in number_patterns.items():
+            if field in extracted:  # 跳过已经设置为0的否定情况
+                continue
+                
+            for pattern in patterns:
+                match = re.search(pattern, conversation_text)
+                if match:
+                    try:
+                        value = int(match.group(1))
+                        if field == "credit_score" and 300 <= value <= 900:
+                            extracted[field] = value
+                            print(f"🔍 {field} extracted: {value}")
+                            break
+                        elif field in ["ABN_years", "GST_years"] and 0 <= value <= 50:
+                            extracted[field] = value
+                            print(f"🔍 {field} extracted: {value}")
+                            break
+                    except (ValueError, IndexError):
+                        continue
+        
+        # 4. 贷款类型识别
+        if any(word in conversation_text for word in ["business", "commercial", "company"]):
             extracted["loan_type"] = "commercial"
+            print(f"🔍 Loan type: commercial")
         elif any(word in conversation_text for word in ["personal", "consumer", "private"]):
             extracted["loan_type"] = "consumer"
+            print(f"🔍 Loan type: consumer")
         
-        # 4. 增强资产类型识别
+        # 5. 资产类型识别
         if any(word in conversation_text for word in ["car", "vehicle", "truck", "van", "motorcycle"]):
             extracted["asset_type"] = "motor_vehicle"
+            print(f"🔍 Asset type: motor_vehicle")
         elif any(word in conversation_text for word in ["equipment", "machinery", "primary"]):
             extracted["asset_type"] = "primary"
+            print(f"🔍 Asset type: primary")
         
-        # 5. 增强房产状态识别
-        property_owner_patterns = [
-            r"own\s+property", r"property\s+owner", r"have\s+property", 
-            r"property\s+backed", r"own\s+a\s+house"
-        ]
-        property_non_owner_patterns = [
-            r"no\s+property", r"don't\s+own", r"rent", r"renting",
-            r"non.property", r"without\s+property"
-        ]
-        
-        for pattern in property_owner_patterns:
-            if re.search(pattern, conversation_text):
-                extracted["property_status"] = "property_owner"
-                break
-        
-        if "property_status" not in extracted:
-            for pattern in property_non_owner_patterns:
-                if re.search(pattern, conversation_text):
-                    extracted["property_status"] = "non_property_owner"
-                    break
-        
-        # 6. 增强数值提取
-        # ABN年数 - 增强模式
-        abn_patterns = [
-            r"(\d+)\s*years?\s*abn", r"abn.*?(\d+)\s*years?", 
-            r"(\d+)\s*years?.*?abn", r"abn\s*for\s*(\d+)\s*years?"
-        ]
-        for pattern in abn_patterns:
-            match = re.search(pattern, conversation_text)
-            if match and "ABN_years" not in extracted:  # 不覆盖否定语句的结果
-                years = int(match.group(1))
-                if 0 <= years <= 50:
-                    extracted["ABN_years"] = years
-                break
-        
-        # GST年数 - 增强模式
-        gst_patterns = [
-            r"(\d+)\s*years?\s*gst", r"gst.*?(\d+)\s*years?",
-            r"(\d+)\s*years?.*?gst", r"gst\s*for\s*(\d+)\s*years?"
-        ]
-        for pattern in gst_patterns:
-            match = re.search(pattern, conversation_text)
-            if match and "GST_years" not in extracted:  # 不覆盖否定语句的结果
-                years = int(match.group(1))
-                if 0 <= years <= 50:
-                    extracted["GST_years"] = years
-                break
-        
-        # 7. 增强信用分数提取
-        credit_patterns = [
-            r"credit\s*score\s*(?:is\s*)?(\d{3,4})",
-            r"score\s*(?:is\s*)?(\d{3,4})",
-            r"(\d{3,4})\s*credit",
-            r"my\s*score\s*(?:is\s*)?(\d{3,4})",
-            r"(\d{3,4})\s*score"
-        ]
-        for pattern in credit_patterns:
-            match = re.search(pattern, conversation_text)
-            if match:
-                score = int(match.group(1))
-                if 300 <= score <= 900:
-                    extracted["credit_score"] = score
-                break
-        
-        # 车辆条件
-        if "new" in conversation_text and "vehicle" in conversation_text:
+        # 6. 车辆相关信息
+        if "new" in conversation_text and ("vehicle" in conversation_text or "car" in conversation_text):
             extracted["vehicle_condition"] = "new"
-        elif "used" in conversation_text and "vehicle" in conversation_text:
+            print(f"🔍 Vehicle condition: new")
+        elif "used" in conversation_text and ("vehicle" in conversation_text or "car" in conversation_text):
             extracted["vehicle_condition"] = "used"
+            print(f"🔍 Vehicle condition: used")
         
-        # 车辆类型
-        if any(word in conversation_text for word in ["model y", "tesla", "passenger car"]):
-            extracted["vehicle_type"] = "passenger_car"
-        elif any(word in conversation_text for word in ["truck", "heavy vehicle"]):
-            extracted["vehicle_type"] = "light_truck"
-        elif any(word in conversation_text for word in ["van", "ute"]):
-            extracted["vehicle_type"] = "van_ute"
-        
-        # 8. 增强贷款金额提取
+        # 7. 贷款金额提取
         amount_patterns = [
-            r"loan\s*amount.*?(\d+(?:,\d{3})*(?:\.\d{2})?)",
+            r"[\$]\s*(\d+(?:,\d{3})*(?:\.\d{2})?)",
+            r"(\d+)k\s*(?:loan|dollar|amount)",
+            r"(\d+)\s*thousand",
             r"borrow.*?(\d+(?:,\d{3})*)",
             r"need.*?(\d+(?:,\d{3})*)",
-            r"want.*?(\d+(?:,\d{3})*)",
-            r"looking\s*for.*?(\d+(?:,\d{3})*)",
-            r"[\$]\s*(\d+(?:,\d{3})*(?:\.\d{2})?)",
-            r"(\d+)k\s*(?:loan|dollar)",
-            r"(\d+)\s*thousand"
+            r"loan.*?amount.*?(\d+(?:,\d{3})*)"
         ]
+        
         for pattern in amount_patterns:
             match = re.search(pattern, conversation_text)
             if match:
@@ -680,9 +681,26 @@ BFS (BRANDED FINANCIAL):
                         amount = float(amount_str)
                     if 1000 <= amount <= 10000000:
                         extracted["desired_loan_amount"] = amount
-                    break
+                        print(f"🔍 Loan amount extracted: {amount}")
+                        break
                 except (ValueError, IndexError):
                     continue
+        
+        # 8. 车辆品牌和型号
+        car_brands = ['toyota', 'holden', 'ford', 'mazda', 'honda', 'subaru', 'mitsubishi', 'nissan', 'hyundai', 'kia', 'volkswagen', 'bmw', 'mercedes', 'audi', 'tesla']
+        for brand in car_brands:
+            if brand in conversation_text:
+                extracted["vehicle_make"] = brand.capitalize()
+                print(f"🔍 Vehicle make: {brand}")
+                break
+        
+        # 特殊处理Tesla Model Y
+        if "model y" in conversation_text or "tesla model y" in conversation_text:
+            extracted["vehicle_make"] = "Tesla"
+            extracted["vehicle_model"] = "Model Y"
+            extracted["vehicle_type"] = "passenger_car"
+            extracted["asset_type"] = "motor_vehicle"
+            print(f"🔍 Special match: Tesla Model Y")
         
         print(f"🔍 Enhanced rule-based extraction result: {extracted}")
         return extracted
@@ -860,12 +878,12 @@ BFS (BRANDED FINANCIAL):
         return questions.get(field, f"Please provide your {field}")
 
     async def _handle_product_matching(self, state: Dict, is_adjustment: bool = False) -> Dict[str, Any]:
-        """处理产品匹配阶段 - 添加调整支持"""
-        print("🎯 Starting product matching...")
+        """🔧 修复：处理产品匹配阶段 - 添加调整支持和完整产品信息"""
+        print("🎯 Starting enhanced product matching...")
         profile = state["customer_profile"]
         
-        # 直接进行产品匹配
-        recommendations = await self._ai_product_matching(profile)
+        # 🔧 修复：增强产品匹配，包含完整信息
+        recommendations = await self._ai_product_matching_enhanced(profile)
         
         if not recommendations:
             print("❌ No recommendations found")
@@ -1024,10 +1042,10 @@ BFS (BRANDED FINANCIAL):
         
         return message
 
-    async def _ai_product_matching(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
-        """AI产品匹配方法"""
+    async def _ai_product_matching_enhanced(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
+        """🔧 修复：增强的AI产品匹配方法，包含完整产品信息"""
         
-        print(f"🎯 Starting AI product matching...")
+        print(f"🎯 Starting enhanced AI product matching...")
         print(f"📊 Customer profile: loan_type={profile.loan_type}, asset_type={profile.asset_type}")
         print(f"📊 Property status={profile.property_status}, credit_score={profile.credit_score}")
         print(f"📊 ABN years={profile.ABN_years}, GST years={profile.GST_years}")
@@ -1035,69 +1053,94 @@ BFS (BRANDED FINANCIAL):
         try:
             # 检查API密钥
             if not self.anthropic_api_key:
-                print("⚠️ No Anthropic API key - using fallback recommendation")
-                return [self._create_comprehensive_fallback_recommendation(profile)]
+                print("⚠️ No Anthropic API key - using enhanced fallback recommendation")
+                return [self._create_comprehensive_fallback_recommendation_enhanced(profile)]
             
-            # 简化的客户档案描述
+            # 构建详细的客户档案
             profile_summary = f"""
 Customer Profile:
-- Type: {profile.loan_type or 'business'} loan for {profile.asset_type or 'vehicle'}
+- Loan Type: {profile.loan_type or 'business'} loan for {profile.asset_type or 'vehicle'}
 - Property Owner: {profile.property_status or 'unknown'}
 - Credit Score: {profile.credit_score or 'not specified'}
 - ABN: {profile.ABN_years or 0} years, GST: {profile.GST_years or 0} years
 - Loan Amount: ${profile.desired_loan_amount or 'not specified'}
-- Vehicle: {profile.vehicle_make or ''} {profile.vehicle_model or ''}
+- Vehicle: {profile.vehicle_make or ''} {profile.vehicle_model or ''} {profile.vehicle_condition or ''}
+- Business Structure: {profile.business_structure or 'not specified'}
 """
 
-            # 获取结构化产品信息
-            condensed_products = self._get_structured_product_info()
+            # 🔧 修复：使用完整的产品文档而不是简化版本
+            full_product_info = self._get_complete_product_information()
 
-            # 修复的系统提示 - 确保只返回纯JSON
-            system_prompt = f"""Find the best loan product match for this customer. Return ONLY valid JSON without any additional text.
+            # 🔧 修复：改进的系统提示，要求更完整的输出
+            system_prompt = f"""你是专业的贷款产品匹配专家。根据客户档案找到最佳贷款产品匹配。
 
-CUSTOMER PROFILE:
+客户档案：
 {profile_summary}
 
-PRODUCT DATABASE:
-{condensed_products}
+完整产品库：
+{full_product_info}
 
-Return ONLY this JSON structure:
+请返回最佳匹配的产品，包含COMPLETE信息。必须返回纯JSON格式：
+
 {{
     "lender_name": "RAF",
-    "product_name": "Vehicle Finance Premium",
+    "product_name": "Vehicle Finance Premium (0-3 years)",
     "base_rate": 6.89,
-    "comparison_rate": 7.12,
+    "comparison_rate": 7.15,
     "monthly_payment": 1250,
     "max_loan_amount": "$450,000",
-    "loan_term_options": "12-60 months",
+    "loan_term_options": "12-60 months (up to 84 for green vehicles)",
     "requirements_met": true,
-    "documentation_type": "Low Doc",
+    "documentation_type": "Low Doc / Lite Doc / Full Doc",
     "detailed_requirements": {{
-        "minimum_credit_score": "600",
-        "abn_years_required": "2+",
-        "gst_years_required": "1+", 
-        "property_ownership": "Required",
-        "deposit_required": "0% (asset-backed)",
-        "asset_age_limit": "25 years at end-of-term"
+        "minimum_credit_score": "600 (Premium tier)",
+        "abn_years_required": "2+ years (4+ for Premium)",
+        "gst_years_required": "1+ years (2+ for Premium)", 
+        "property_ownership": "Required for Premium tier",
+        "deposit_required": "0% if asset-backed, 10% if non-asset-backed",
+        "business_structure": "Any structure accepted",
+        "asset_age_limit": "Vehicle max 25 years at end-of-term",
+        "asset_condition": "New/demonstrator/used accepted",
+        "loan_to_value_ratio": "Up to 120% for standard vehicles"
     }},
     "fees_breakdown": {{
         "establishment_fee": "$495",
         "monthly_account_fee": "$4.95",
         "private_sale_surcharge": "$695",
-        "brokerage_cap": "5.5%"
+        "ppsr_fee": "At cost (compulsory if invoice > $50,000)",
+        "brokerage_cap": "5.5% (no rate impact below this)",
+        "variation_fee": "$60 per variation",
+        "early_termination_fee": "Varies (Consumer: $750 max, Commercial: 35% remaining interest)"
     }},
     "rate_conditions": {{
-        "rate_loadings": "+2% private sale, +2% classic car",
-        "balloon_options": "Up to 50% (36m), 45% (48m), 40% (60m)"
+        "base_rate_range": "6.89% (new 0-3yr) to 7.49% (used >3yr)",
+        "premium_discount": "-0.50% for Premium tier customers",
+        "rate_loadings": "+2% each for: private sale, classic car, asset age >16yr, prime mover (max 4% total)",
+        "balloon_options": "New vehicles: 50%/45%/40% (36/48/60m), Used: 40%/35%/30%",
+        "green_vehicle_bonus": "Electric vehicles qualify for preferential terms"
     }},
     "documentation_requirements": [
-        "Application and privacy consent",
-        "Asset and liability statement",
-        "90-day bank statements (if Full Doc)"
+        "Application form and privacy consent",
+        "Asset and liability statement (Low Doc minimum)",
+        "12-month ATO portal history (Lite Doc)",
+        "Two latest BAS portals (Lite Doc)", 
+        "90-day bank statements (Full Doc mandatory, Lite Doc on request)",
+        "Recent financial statements or tax returns (Full Doc)",
+        "Property ownership verification (if applicable)",
+        "Vehicle invoice and PPSR search (if price > $50k)",
+        "Insurance Certificate of Currency (if NAF > $100k)"
+    ],
+    "special_conditions": [
+        "Privacy consent forms must be dated within 90 days",
+        "Credit approval valid for 90 days",
+        "Vehicle must be registered by settlement",
+        "Roadworthy certificate required for used vehicles",
+        "Independent valuation required for private sales",
+        "Settlement welcome call required for loans > $100k"
     ]
 }}
 
-CRITICAL: Return ONLY valid JSON. No explanatory text."""
+CRITICAL: 返回完整的JSON，包含所有上述字段。不要省略任何信息。"""
 
             headers = {
                 "x-api-key": self.anthropic_api_key,
@@ -1107,57 +1150,190 @@ CRITICAL: Return ONLY valid JSON. No explanatory text."""
 
             payload = {
                 "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 1200,
+                "max_tokens": 2000,  # 增加token限制以获取完整信息
                 "temperature": 0.1,
                 "system": system_prompt,
                 "messages": [
-                    {"role": "user", "content": "Find the best loan product for this customer. Return only JSON."}
+                    {"role": "user", "content": "找到最佳贷款产品匹配，返回完整的产品信息JSON。"}
                 ]
             }
 
-            print(f"📤 Sending request to Claude API...")
+            print(f"📤 Sending enhanced request to Claude API...")
 
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(self.api_url, headers=headers, json=payload)
                 
-                print(f"📥 Claude API response status: {response.status_code}")
+                print(f"📥 Enhanced API response status: {response.status_code}")
                 
                 if response.status_code == 200:
                     result = response.json()
                     ai_response = result['content'][0]['text']
                     
-                    print(f"🤖 Claude raw response (first 300 chars): {ai_response[:300]}...")
+                    print(f"🤖 Claude enhanced response (first 300 chars): {ai_response[:300]}...")
                     
-                    # 使用强化的JSON清理方法
-                    clean_response = self._robust_json_cleaning(ai_response)
+                    # 使用增强的JSON清理方法
+                    clean_response = self._robust_json_cleaning_fixed(ai_response)
                     
                     if clean_response:
                         try:
                             recommendation = json.loads(clean_response)
-                            print(f"✅ Successfully parsed recommendation: {recommendation.get('lender_name', 'Unknown')}")
+                            print(f"✅ Successfully parsed enhanced recommendation: {recommendation.get('lender_name', 'Unknown')}")
                             return [recommendation]
                             
                         except json.JSONDecodeError as e:
                             print(f"❌ JSON parsing still failed: {e}")
-                            print("🔄 Using fallback recommendation...")
-                            return [self._create_comprehensive_fallback_recommendation(profile)]
+                            print("🔄 Using enhanced fallback recommendation...")
+                            return [self._create_comprehensive_fallback_recommendation_enhanced(profile)]
                     else:
                         print("❌ Could not extract valid JSON from Claude response")
-                        print("🔄 Using fallback recommendation...")
-                        return [self._create_comprehensive_fallback_recommendation(profile)]
+                        print("🔄 Using enhanced fallback recommendation...")
+                        return [self._create_comprehensive_fallback_recommendation_enhanced(profile)]
                 
                 else:
                     print(f"❌ API error: {response.status_code} - {response.text[:200]}")
-                    return [self._create_comprehensive_fallback_recommendation(profile)]
+                    return [self._create_comprehensive_fallback_recommendation_enhanced(profile)]
                     
         except Exception as e:
-            print(f"❌ Unexpected error in AI product matching: {e}")
-            return [self._create_comprehensive_fallback_recommendation(profile)]
+            print(f"❌ Unexpected error in enhanced AI product matching: {e}")
+            return [self._create_comprehensive_fallback_recommendation_enhanced(profile)]
 
-    def _create_comprehensive_fallback_recommendation(self, profile: CustomerProfile) -> Dict[str, Any]:
-        """创建包含完整信息的智能后备推荐"""
+    def _get_complete_product_information(self) -> str:
+        """🔧 修复：获取完整产品信息而不是简化版本"""
         
-        print("🔄 Creating comprehensive fallback recommendation...")
+        # 返回详细的产品信息，包含完整的文档要求
+        complete_info = """
+RAF (RESIMAC ASSET FINANCE) - COMPLETE PRODUCT DETAILS:
+
+Vehicle Finance (0-3 years):
+- Base Rate: 6.89% p.a. (Premium tier gets -0.50% discount = 6.39%)
+- Comparison Rate: ~7.15% (includes fees)
+- Max Loan: $450,000 (Premium tier), $400,000 (Standard), $200,000 (Basic)
+- Terms: 12-60 months (up to 84 months for green vehicles)
+- Credit Score: 600+ (Premium), 550+ with 20% deposit
+- ABN: 4+ years (Premium), 2+ years (Standard/Basic)
+- GST: 2+ years (Premium), 1+ years (Standard/Basic)
+- Property: Required for Premium tier
+- Documentation Levels: Low Doc / Lite Doc / Full Doc
+- Fees: Establishment $495, Monthly $4.95, Private sale +$695, PPSR at cost
+- Rate Loadings: +2% each (private sale, classic car, age >16yr, prime mover)
+- Balloons: New vehicles 50%/45%/40% (36/48/60m), Used 40%/35%/30%
+
+DOCUMENTATION REQUIREMENTS (RAF):
+Low Doc: Application + privacy consent + A&L statement
+Lite Doc: Low Doc items + 12m ATO portal + 2 BAS + 90d bank statements (on request)
+Full Doc: Lite Doc items + mandatory 90d bank statements + recent financials/tax returns
+
+SPECIAL RAF REQUIREMENTS:
+- Privacy consent forms dated within 90 days
+- Insurance CoC if NAF > $100,000 (must name Resimac)
+- PPSR search compulsory if invoice price > $50,000
+- Settlement welcome call required for loans > $100,000
+- Vehicle registration by settlement (roadworthy cert for used)
+- Independent valuation required for all private sales
+
+ANGLE FINANCE - COMPLETE PRODUCT DETAILS:
+
+Primary Asset Finance:
+- Rates: 7.99% (Property owner) to 16.75% (Non-property)
+- Max Terms: 10-20 years depending on product
+- Credit Score: 500-650 range accepted
+- ABN: 2+ years, GST: 1+ years minimum
+- Fees: Setup $540 (dealer) / $700 (private), Monthly $4.95
+- Documentation: Low Doc up to $100k, Full Doc for higher amounts
+
+A+ Premium Products:
+- Rate: 6.99% (Standard) / 6.49% (Discount) / 5.99% (New assets discount)
+- Requirements: ABN 4+ years, GST 2+ years, Company/Trust/Partnership only
+- Property backing required, Corporate credit 550+, Individual 600+
+- Min deal: $300k for discount rates
+
+BFS (BRANDED FINANCIAL SERVICES) - COMPLETE DETAILS:
+
+Prime Commercial:
+- Rates: 7.65% (new) to 11.75% (used non-asset-backed)
+- Credit: 600+ (500 with 20% deposit)
+- Documentation: 90-day bank statements + financials for >$100k
+- Max: $250k private sales, $400k high-value (case-by-case)
+
+Prime Consumer:
+- Rates: 8.80% (score >750) to 13.55% (score 500+)
+- Income verification required (PAYG payslips, business returns)
+- 20% deposit required for scores <600
+
+Plus (Non-Prime):
+- Rate: 15.98% (may discount up to 2%)
+- Credit: 500+ minimum
+- Bank statements mandatory
+- Max: $100k loan amount
+
+FCAU (FLEXICOMMERCIAL) - COMPLETE DETAILS:
+
+FlexiPremium:
+- Rates: 6.85%-7.74% depending on loan size
+- Requirements: Company/Trust only, ABN/GST 4+ years
+- Asset: Primary/Secondary ≤5 years (Primary) / ≤2 years (Secondary)
+- Max: $500k (larger amounts need BDM approval)
+
+FlexiCommercial:
+- Rates: 8.15%-12.90% based on amount and asset type
+- Primary: Up to 20 years old at end-of-term (trailers 30 years)
+- Secondary: Up to 7 years old at end-of-term
+- Tertiary: Up to 7 years old, rates 12.90%-15.90%
+
+Rate Add-ons (stackable, max 4%):
++1% prime mover or private sale
++1% term <24 months
++1% asset 10-15 years old at end-of-term
++1.25% non-asset-backed
++1.25% term >60 months
++2% asset 15-20 years old at end-of-term
+
+DOCUMENTATION REQUIREMENTS BY LENDER:
+
+RAF Full Documentation:
+- Application and privacy consent
+- Asset and liability statement
+- 12-month ATO portal history
+- Latest two BAS portals
+- 90-day bank statements (mandatory Full Doc)
+- Recent financial statements or tax returns
+- Property ownership verification documents
+- Vehicle invoice and compliance documentation
+- Insurance Certificate of Currency (if NAF >$100k)
+- PPSR search results (if invoice >$50k)
+- Roadworthy certificate (used vehicles)
+- Independent valuation report (private sales)
+
+ANGLE Full Documentation:
+- 6 months bank statements OR accountant-prepared financials (FY2024 + FY2023)
+- Commitment schedule (mandatory)
+- ATO portal statements (for amounts ≥$250k)
+- Good payment history (last 12 months for ≥$250k)
+- Detailed business background
+- List of major clients
+- Aged debtor and creditor listing (≥$500k)
+- Cashflow projections (if available, for >$1M)
+
+BFS Documentation:
+- 90-day bank statements (all loans)
+- For loans >$100k: Externally prepared financial statements ≤18 months old (2 years)
+- Latest tax return for borrowing entity
+- Recent management accounts or BAS (if statements >18 months old)
+
+FCAU Documentation:
+- Standard application and privacy consent
+- Asset and liability statement
+- Clear Equifax file or supporting bank statements
+- Statutory declaration (if required)
+- Vehicle inspection (one of four approved methods)
+"""
+        
+        return complete_info
+
+    def _create_comprehensive_fallback_recommendation_enhanced(self, profile: CustomerProfile) -> Dict[str, Any]:
+        """🔧 修复：创建包含完整信息的增强智能后备推荐"""
+        
+        print("🔄 Creating comprehensive enhanced fallback recommendation...")
         print(f"📊 Profile analysis: property={profile.property_status}, credit={profile.credit_score}")
         
         # 估算贷款金额用于月供计算
@@ -1182,47 +1358,68 @@ CRITICAL: Return ONLY valid JSON. No explanatory text."""
                 "comparison_rate": comparison_rate,
                 "monthly_payment": monthly_payment,
                 "max_loan_amount": "$450,000",
-                "loan_term_options": "12-60 months",
+                "loan_term_options": "12-60 months (up to 84 for green vehicles)",
                 "requirements_met": True,
-                "documentation_type": "Low Doc",
+                "documentation_type": "Low Doc / Lite Doc / Full Doc",
                 
                 "detailed_requirements": {
                     "minimum_credit_score": "600 (Premium tier)",
-                    "abn_years_required": "2+ years",
-                    "gst_years_required": "2+ years", 
-                    "property_ownership": "Required (or spouse property)",
+                    "abn_years_required": "4+ years (Premium tier)",
+                    "gst_years_required": "2+ years (Premium tier)", 
+                    "property_ownership": "Required for Premium tier",
                     "deposit_required": "0% if asset-backed, 10% if non-asset-backed",
                     "business_structure": "Any structure accepted",
-                    "asset_age_limit": "Vehicle max 25 years at end-of-term"
+                    "asset_age_limit": "Vehicle max 25 years at end-of-term",
+                    "asset_condition": "New/demonstrator/used all accepted",
+                    "loan_to_value_ratio": "Up to 120% for standard vehicles"
                 },
                 
                 "fees_breakdown": {
                     "establishment_fee": "$495",
                     "monthly_account_fee": "$4.95",
                     "private_sale_surcharge": "$695",
-                    "ppsr_fee": "At cost",
-                    "brokerage_cap": "5.5% (no rate impact)"
+                    "ppsr_fee": "At cost (compulsory if invoice > $50,000)",
+                    "brokerage_cap": "5.5% (no rate impact below this)",
+                    "variation_fee": "$60 per variation",
+                    "early_termination_fee": "Consumer: $750 max, Commercial: 35% remaining interest"
                 },
                 
                 "rate_conditions": {
-                    "base_rate_range": "6.89% (new vehicles 0-3 years)",
+                    "base_rate_range": "6.89% (new 0-3yr) to 7.49% (used >3yr)",
                     "premium_discount": "-0.50% for Premium tier customers",
-                    "rate_loadings": "+2% private sale, +2% classic car, +2% prime mover",
-                    "balloon_options": "Up to 50% (36m), 45% (48m), 40% (60m)"
+                    "rate_loadings": "+2% each for: private sale, classic car, asset age >16yr, prime mover (max 4% total)",
+                    "balloon_options": "New vehicles: 50%/45%/40% (36/48/60m), Used: 40%/35%/30%",
+                    "green_vehicle_bonus": "Electric vehicles qualify for preferential terms"
                 },
                 
                 "documentation_requirements": [
-                    "Application and privacy consent",
-                    "Asset and liability statement",
-                    "12-month ATO portal history (Lite-Doc)",
-                    "2 latest BAS portals",
-                    "90-day bank statements (Full-Doc only)",
-                    "Recent financial statements (Full-Doc)"
+                    "Application form and privacy consent",
+                    "Asset and liability statement (Low Doc minimum)",
+                    "12-month ATO portal history (Lite Doc)",
+                    "Two latest BAS portals (Lite Doc)", 
+                    "90-day bank statements (Full Doc mandatory, Lite Doc on request)",
+                    "Recent financial statements or tax returns (Full Doc)",
+                    "Property ownership verification documents",
+                    "Vehicle invoice and PPSR search (if price > $50k)",
+                    "Insurance Certificate of Currency (if NAF > $100k)",
+                    "Roadworthy certificate (used vehicles)",
+                    "Independent valuation report (private sales)"
+                ],
+                
+                "special_conditions": [
+                    "Privacy consent forms must be dated within 90 days of application",
+                    "Credit approval remains valid for 90 days",
+                    "Vehicle must be registered by or at settlement",
+                    "Settlement welcome call required for loans > $100,000",
+                    "Overseas borrowers require verification calls and travel itinerary",
+                    "Certificate of Currency must extend ≥30 days beyond settlement",
+                    "PPSR searches compulsory on asset prices > $50,000",
+                    "Independent valuation mandatory on all private-sale assets"
                 ]
             }
         
         else:
-            print("✅ Default match: General purpose -> Angle Finance")
+            print("✅ Default match: General purpose -> Angle Finance Enhanced")
             
             base_rate = 10.75
             establishment_fee = 540
@@ -1236,39 +1433,56 @@ CRITICAL: Return ONLY valid JSON. No explanatory text."""
                 "base_rate": base_rate,
                 "comparison_rate": comparison_rate,
                 "monthly_payment": monthly_payment,
-                "max_loan_amount": "$100,000 (Low Doc)",
-                "loan_term_options": "12-60 months",
+                "max_loan_amount": "$100,000 (Low Doc), $250,000+ (Full Doc)",
+                "loan_term_options": "12-84 months depending on asset",
                 "requirements_met": True,
-                "documentation_type": "Low Doc",
+                "documentation_type": "Low Doc / Full Doc",
                 
                 "detailed_requirements": {
-                    "minimum_credit_score": "500-650 range",
+                    "minimum_credit_score": "500-650 range accepted",
                     "abn_years_required": "2+ years",
                     "gst_years_required": "1+ years",
-                    "property_ownership": "Preferred but not required",
-                    "deposit_required": "20% if non-property owner",
-                    "business_structure": "Any structure",
-                    "asset_age_limit": "Varies by asset type"
+                    "property_ownership": "Preferred but not required (20% deposit if non-property)",
+                    "deposit_required": "20% if non-property owner, 0% if property backed",
+                    "business_structure": "Any structure accepted",
+                    "asset_age_limit": "Varies by asset type and product"
                 },
                 
                 "fees_breakdown": {
                     "establishment_fee": "$540 (dealer), $700 (private)",
                     "monthly_account_fee": "$4.95",
-                    "brokerage_cap": "Up to 8% (with rate loading)"
+                    "brokerage_cap": "Up to 8% (with rate loading above 5%)",
+                    "ppsr_fee": "At cost",
+                    "origination_fee": "Up to $1,400 (incl. GST)"
                 },
                 
                 "rate_conditions": {
-                    "base_rate_range": "7.99%-16.95% depending on product",
-                    "rate_loadings": "Various based on risk factors",
-                    "balloon_options": "Limited availability"
+                    "base_rate_range": "7.99%-16.95% depending on product and risk",
+                    "rate_loadings": "Various loadings based on risk factors",
+                    "balloon_options": "Limited availability depending on product",
+                    "special_products": "A+ rates from 5.99% for premium customers"
                 },
                 
                 "documentation_requirements": [
-                    "Application form",
-                    "Privacy consent", 
-                    "6 months bank statements (Full Doc)",
-                    "Financial statements (if required)",
-                    "Asset inspection reports"
+                    "Application form and privacy consent",
+                    "6 months bank statements OR accountant-prepared financials (FY2024 + FY2023)",
+                    "Commitment schedule (mandatory for all)",
+                    "ATO portal statements (for amounts ≥$250,000)",
+                    "Good payment history documentation (last 12 months for ≥$250k)",
+                    "Detailed business background information",
+                    "List of major clients (for larger loans)",
+                    "Aged debtor and creditor listing (≥$500,000)",
+                    "Cashflow projections (if available, for >$1,000,000)"
+                ],
+                
+                "special_conditions": [
+                    "All loan conditions must be satisfied before settlement",
+                    "Signed documents required via DocuSign platform",
+                    "Vehicle inspection mandatory for private sales",
+                    "Valid vehicle registration (Rego) must be provided",
+                    "PPSR must be clear (no encumbrances)",
+                    "Tax invoice required before settlement",
+                    "Certificate of Currency required if loan amount > $100,000 AUD"
                 ]
             }
 

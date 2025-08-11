@@ -7,6 +7,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
   const [isConnected, setIsConnected] = useState(false);
   const [sessionId, setSessionId] = useState('');
   const [connectionError, setConnectionError] = useState(null);
+  const [debugInfo, setDebugInfo] = useState({ lastSync: null, customerInfoReceived: null });
   
   const chatRef = useRef(null);
   const textareaRef = useRef(null);
@@ -32,7 +33,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     checkConnection();
   }, []);
 
-  // 🔧 增强的连接检查，带重试机制
+  // 🔧 修复1：增强的连接检查，带重试机制
   const checkConnection = async (retries = 3) => {
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
@@ -71,20 +72,35 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     }
   };
 
-  // 🔧 修改发送消息函数，添加更强的错误处理
+  // 🔧 修复2：增强客户信息同步监控
+  useEffect(() => {
+    if (customerInfo && Object.keys(customerInfo).length > 0) {
+      console.log('🔍 Chatbot received updated customerInfo:', customerInfo);
+      setDebugInfo(prev => ({
+        ...prev,
+        lastSync: new Date().toISOString(),
+        customerInfoReceived: Object.keys(customerInfo).length
+      }));
+    }
+  }, [customerInfo]);
+
+  // 🔧 修复3：改进的发送消息函数，增强错误处理和数据同步
   const sendMessage = async (message, sessionId, chatHistory = [], currentCustomerInfo = null) => {
+    console.log('📤 Preparing to send message...');
+    console.log('📊 Current customer info to send:', currentCustomerInfo);
+    
     const payload = {
       message: message,
       session_id: sessionId,
       history: chatHistory
     };
 
-    // 🔧 添加当前客户信息到请求中
+    // 🔧 修复：确保客户信息正确传递
     if (currentCustomerInfo && Object.keys(currentCustomerInfo).length > 0) {
       // 过滤掉空值和undefined值
       const cleanedCustomerInfo = Object.fromEntries(
         Object.entries(currentCustomerInfo).filter(([key, value]) => 
-          value !== null && value !== undefined && value !== ''
+          value !== null && value !== undefined && value !== '' && value !== 'undefined'
         )
       );
       
@@ -94,7 +110,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       }
     }
 
-    console.log('📤 Sending payload:', JSON.stringify(payload, null, 2));
+    console.log('📤 Final payload:', JSON.stringify(payload, null, 2));
 
     const response = await fetch(`${API_BASE_URL}/chat`, {
       method: 'POST',
@@ -113,10 +129,16 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
 
     const responseData = await response.json();
     console.log('📥 Received response:', responseData);
+    
+    // 🔧 修复：增强响应验证
+    if (!responseData.reply) {
+      throw new Error('Invalid response: missing reply field');
+    }
+    
     return responseData;
   };
 
-  // 🔧 修改处理发送函数，增强错误处理和用户反馈
+  // 🔧 修复4：增强的处理发送函数，改进错误处理和用户反馈
   const handleSend = async () => {
     if (!input.trim() || isLoading || !sessionId) return;
 
@@ -142,7 +164,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     setIsLoading(true);
 
     try {
-      // 🔧 检查连接状态
+      // 🔧 修复：检查连接状态
       if (!isConnected) {
         console.log('🔄 Not connected, attempting to reconnect...');
         await checkConnection(1); // 快速重连尝试
@@ -162,11 +184,13 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         }
       ];
       
-      // 🔧 发送到后端时包含最新的customerInfo
+      // 🔧 修复：确保发送最新的customerInfo
       console.log('📤 Sending with customerInfo:', customerInfo);
+      console.log('📊 Debug info:', debugInfo);
+      
       const apiResponse = await sendMessage(currentInput, sessionId, fullChatHistory, customerInfo);
       
-      // 🔧 增强的响应验证
+      // 🔧 修复：增强的响应验证
       if (!apiResponse) {
         throw new Error('Empty response from server');
       }
@@ -174,7 +198,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       if (apiResponse.status === 'success' && apiResponse.reply) {
         const replyText = apiResponse.reply;
         
-        // 🔧 处理推荐 - 支持多个推荐的管理，增强验证
+        // 🔧 修复：处理推荐 - 支持多个推荐的管理，增强验证
         if (apiResponse.recommendations && Array.isArray(apiResponse.recommendations) && apiResponse.recommendations.length > 0) {
           console.log('📋 Received recommendations:', apiResponse.recommendations);
           
@@ -184,6 +208,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           );
           
           if (validRecommendations.length > 0 && onRecommendationUpdate) {
+            console.log('📋 Updating with valid recommendations:', validRecommendations);
             onRecommendationUpdate(validRecommendations);
           } else {
             console.warn('⚠️ Received invalid recommendation data');
@@ -206,8 +231,16 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
             timestamp: new Date().toISOString()
           });
         }
+        
+        // 🔧 修复：更新调试信息
+        setDebugInfo(prev => ({
+          ...prev,
+          lastApiCall: new Date().toISOString(),
+          lastResponseStatus: 'success'
+        }));
+        
       } else {
-        // 🔧 处理API返回的错误状态
+        // 🔧 修复：处理API返回的错误状态
         const errorMessage = apiResponse.reply || 'Server returned an error status';
         throw new Error(errorMessage);
       }
@@ -215,7 +248,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     } catch (error) {
       console.error('❌ Send failed:', error);
       
-      // 🔧 更智能的错误处理和用户友好的错误消息
+      // 🔧 修复：更智能的错误处理和用户友好的错误消息
       let errorMessage = "I'm having trouble connecting. Please try again in a moment.";
       
       if (error.name === 'AbortError' || error.message.includes('timeout')) {
@@ -242,10 +275,18 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       
       setMessages(prev => [...prev, botErrorMessage]);
       
-      // 🔧 通知父组件错误（如果有错误处理回调）
+      // 🔧 修复：通知父组件错误（如果有错误处理回调）
       if (onError) {
         onError(error);
       }
+      
+      // 更新调试信息
+      setDebugInfo(prev => ({
+        ...prev,
+        lastApiCall: new Date().toISOString(),
+        lastResponseStatus: 'error',
+        lastError: error.message
+      }));
       
     } finally {
       setIsLoading(false);
@@ -275,30 +316,45 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     }
   };
 
-  // 🔧 重连功能
+  // 🔧 修复：重连功能
   const handleReconnect = async () => {
     setConnectionError(null);
     await checkConnection(3);
   };
 
-  // 🔧 调试信息：监控customerInfo变化
-  useEffect(() => {
-    if (customerInfo && Object.keys(customerInfo).length > 0) {
-      console.log('🔍 Chatbot received updated customerInfo:', customerInfo);
-    }
-  }, [customerInfo]);
-
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: '#fef7e8' }}>
-      {/* Header - 🔧 简化，只显示标题 */}
+      {/* Header */}
       <div className="px-6 py-4 border-b" style={{ backgroundColor: '#fef7e8' }}>
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold text-gray-800">Agent X</h1>
-          {/* 🔧 完全移除连接状态和调试信息显示 */}
+          
+          {/* 🔧 调试信息显示（开发模式） */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="text-xs text-gray-500">
+              <div>Sync: {debugInfo.lastSync ? new Date(debugInfo.lastSync).toLocaleTimeString() : 'None'}</div>
+              <div>Info: {debugInfo.customerInfoReceived} fields</div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 🔧 完全移除连接错误提示，让用户体验更流畅 */}
+      {/* 🔧 连接错误提示（简化，只在真正需要时显示） */}
+      {connectionError && !isConnected && (
+        <div className="mx-6 mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="text-yellow-700 text-sm">
+              Connection issue detected. Some features may be limited.
+            </div>
+            <button
+              onClick={handleReconnect}
+              className="text-yellow-600 hover:text-yellow-800 text-sm underline"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 聊天区域 */}
       <div
@@ -338,7 +394,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         )}
       </div>
 
-      {/* 输入区域 - 🔧 简化状态提示，移除底部说明文字 */}
+      {/* 输入区域 */}
       <div className="px-6 py-4 border-t" style={{ backgroundColor: '#fef7e8' }}>
         <div className="relative">
           <textarea
@@ -349,6 +405,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
             rows={1}
             placeholder={
               isLoading ? "Sending..." :
+              !isConnected ? "Connecting..." :
               "Tell me about your loan requirements..."
             }
             className="w-full resize-none rounded-xl border border-gray-300 px-5 py-4 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
@@ -368,7 +425,21 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           </button>
         </div>
         
-        {/* 🔧 完全移除底部的状态信息和提示文字 */}
+        {/* 🔧 状态指示器（简化版） */}
+        <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
+          <div className="flex items-center space-x-2">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <span>{isConnected ? 'Connected' : 'Connecting...'}</span>
+          </div>
+          
+          {/* 开发模式下显示更多调试信息 */}
+          {process.env.NODE_ENV === 'development' && debugInfo.lastResponseStatus && (
+            <div className="text-right">
+              <div>Last: {debugInfo.lastResponseStatus}</div>
+              {debugInfo.lastError && <div className="text-red-500">Error: {debugInfo.lastError.substring(0, 30)}...</div>}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

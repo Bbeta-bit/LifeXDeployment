@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { X, Info, DollarSign, Calendar, FileText, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
+import { X, Info, DollarSign, Calendar, FileText, AlertCircle, CheckCircle, XCircle, Shield, Clock, CreditCard } from 'lucide-react';
 
 const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => {
   const [storedRecommendations, setStoredRecommendations] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [expandedSections, setExpandedSections] = useState({});
 
   // 🔧 管理推荐产品存储，支持最新2个推荐的显示和标记
   useEffect(() => {
@@ -62,9 +63,24 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
     }
   };
 
+  // 🔧 切换展开/收起某个部分
+  const toggleSection = (productId, sectionName) => {
+    const key = `${productId}_${sectionName}`;
+    setExpandedSections(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  // 🔧 检查某个部分是否展开
+  const isSectionExpanded = (productId, sectionName) => {
+    const key = `${productId}_${sectionName}`;
+    return expandedSections[key] || false;
+  };
+
   // 🔧 增强的单个产品详细视图，显示完整信息
   const renderSingleProduct = (product) => (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
       <div className="border-b pb-4">
         <div className="flex items-center justify-between">
           <div className="flex-1">
@@ -232,6 +248,21 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
         </div>
       )}
 
+      {/* 🔧 新增：特殊条件 - 显示产品特殊条件 */}
+      {product.special_conditions && Array.isArray(product.special_conditions) && product.special_conditions.length > 0 && (
+        <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
+          <h4 className="font-semibold text-orange-800 mb-3 flex items-center">
+            <Shield className="w-4 h-4 mr-1" />
+            Special Conditions & Notes
+          </h4>
+          <ul className="list-disc list-inside space-y-1 text-sm">
+            {product.special_conditions.map((condition, index) => (
+              <li key={index} className="text-orange-700">{String(condition)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* 🔧 申请建议 */}
       <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
         <h4 className="font-medium text-blue-800 mb-2">💡 Application Tips</h4>
@@ -329,26 +360,126 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
               </div>
             </div>
 
-            {/* 🔧 快速要求检查 */}
-            {product.detailed_requirements && Object.keys(product.detailed_requirements).length > 0 && (
-              <div className="mb-4 p-3 bg-gray-50 rounded border">
-                <h5 className="font-medium text-gray-800 mb-2 text-sm">Key Requirements:</h5>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                  {Object.entries(product.detailed_requirements).slice(0, 4).map(([key, value]) => (
-                    <div key={key} className="flex justify-between">
-                      <span className="text-gray-600">{key.replace(/_/g, ' ')}:</span>
-                      <span className="font-medium">{String(value)}</span>
+            {/* 🔧 可展开的详细信息部分 */}
+            <div className="space-y-3">
+              
+              {/* 要求部分 */}
+              {product.detailed_requirements && Object.keys(product.detailed_requirements).length > 0 && (
+                <div className="border border-gray-200 rounded">
+                  <button
+                    onClick={() => toggleSection(product.id, 'requirements')}
+                    className="w-full p-3 bg-gray-50 hover:bg-gray-100 text-left font-medium text-gray-800 flex items-center justify-between"
+                  >
+                    <span className="flex items-center">
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Eligibility Requirements ({Object.keys(product.detailed_requirements).length})
+                    </span>
+                    <span className="transform transition-transform">
+                      {isSectionExpanded(product.id, 'requirements') ? '▼' : '▶'}
+                    </span>
+                  </button>
+                  {isSectionExpanded(product.id, 'requirements') && (
+                    <div className="p-3 bg-white">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                        {Object.entries(product.detailed_requirements).map(([key, value]) => (
+                          <div key={key} className="flex justify-between">
+                            <span className="text-gray-600">{key.replace(/_/g, ' ')}:</span>
+                            <span className="font-medium">{String(value)}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  ))}
+                  )}
                 </div>
-                {Object.keys(product.detailed_requirements).length > 4 && (
-                  <p className="text-xs text-gray-500 mt-1">+ {Object.keys(product.detailed_requirements).length - 4} more requirements</p>
-                )}
-              </div>
-            )}
+              )}
+
+              {/* 费用部分 */}
+              {product.fees_breakdown && Object.keys(product.fees_breakdown).length > 0 && (
+                <div className="border border-gray-200 rounded">
+                  <button
+                    onClick={() => toggleSection(product.id, 'fees')}
+                    className="w-full p-3 bg-gray-50 hover:bg-gray-100 text-left font-medium text-gray-800 flex items-center justify-between"
+                  >
+                    <span className="flex items-center">
+                      <CreditCard className="w-4 h-4 mr-2" />
+                      Fees & Charges ({Object.keys(product.fees_breakdown).length})
+                    </span>
+                    <span className="transform transition-transform">
+                      {isSectionExpanded(product.id, 'fees') ? '▼' : '▶'}
+                    </span>
+                  </button>
+                  {isSectionExpanded(product.id, 'fees') && (
+                    <div className="p-3 bg-white">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                        {Object.entries(product.fees_breakdown).map(([key, value]) => (
+                          <div key={key} className="flex justify-between">
+                            <span className="text-gray-600">{key.replace(/_/g, ' ')}:</span>
+                            <span className="font-medium">{String(value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 文档要求部分 */}
+              {product.documentation_requirements && Array.isArray(product.documentation_requirements) && product.documentation_requirements.length > 0 && (
+                <div className="border border-gray-200 rounded">
+                  <button
+                    onClick={() => toggleSection(product.id, 'documentation')}
+                    className="w-full p-3 bg-gray-50 hover:bg-gray-100 text-left font-medium text-gray-800 flex items-center justify-between"
+                  >
+                    <span className="flex items-center">
+                      <FileText className="w-4 h-4 mr-2" />
+                      Documentation Required ({product.documentation_requirements.length})
+                    </span>
+                    <span className="transform transition-transform">
+                      {isSectionExpanded(product.id, 'documentation') ? '▼' : '▶'}
+                    </span>
+                  </button>
+                  {isSectionExpanded(product.id, 'documentation') && (
+                    <div className="p-3 bg-white">
+                      <ul className="list-disc list-inside space-y-1 text-xs">
+                        {product.documentation_requirements.map((req, index) => (
+                          <li key={index} className="text-gray-700">{String(req)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 特殊条件部分 */}
+              {product.special_conditions && Array.isArray(product.special_conditions) && product.special_conditions.length > 0 && (
+                <div className="border border-gray-200 rounded">
+                  <button
+                    onClick={() => toggleSection(product.id, 'conditions')}
+                    className="w-full p-3 bg-gray-50 hover:bg-gray-100 text-left font-medium text-gray-800 flex items-center justify-between"
+                  >
+                    <span className="flex items-center">
+                      <Shield className="w-4 h-4 mr-2" />
+                      Special Conditions ({product.special_conditions.length})
+                    </span>
+                    <span className="transform transition-transform">
+                      {isSectionExpanded(product.id, 'conditions') ? '▼' : '▶'}
+                    </span>
+                  </button>
+                  {isSectionExpanded(product.id, 'conditions') && (
+                    <div className="p-3 bg-white">
+                      <ul className="list-disc list-inside space-y-1 text-xs">
+                        {product.special_conditions.map((condition, index) => (
+                          <li key={index} className="text-orange-700">{String(condition)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* 操作按钮 */}
-            <div className="flex justify-end space-x-2">
+            <div className="flex justify-end space-x-2 mt-4">
               <button
                 onClick={() => handleProductClick(product)}
                 className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
@@ -365,7 +496,7 @@ const ProductComparison = ({ recommendations = [], onRecommendationUpdate }) => 
       <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
         <h4 className="font-medium text-blue-800 mb-2">💡 Comparison Tip</h4>
         <p className="text-sm text-blue-700">
-          Your current recommendation reflects your latest requirements. Compare the key differences to see how adjustments impact your loan terms. Click "View All Details" to see complete eligibility requirements, fees, and documentation needed.
+          Your current recommendation reflects your latest requirements. Compare the key differences to see how adjustments impact your loan terms. Expand each section to see complete details, or click "View All Details" for the comprehensive overview.
         </p>
       </div>
     </div>
