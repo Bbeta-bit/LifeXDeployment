@@ -149,7 +149,7 @@ The declaration must include declarant identity and capacity, ABN / ACN, a full 
 
 # Product Sheets
 
-## Product 01 – FlexiPremium Standard
+## Product 01 
 
 - **Asset class**: Primary assets ≤ 5 years at settlement; Secondary assets ≤ 2 years.  
 - **Loan amount**: 50 000 – 500 000 NAF (larger amounts require BDM approval).  
@@ -167,7 +167,7 @@ The declaration must include declarant identity and capacity, ABN / ACN, a full 
 
 ---
 
-## Product 02 – FlexiCommercial (Primary Assets)
+## Product 02 
 
 - **Asset**: primary equipment ≤ 20 years at end of term (trailers ≤ 30 years).  
 - **Loan amount**: 10 000 – no prescribed maximum; single deal ≤ 500 000 without BDM approval.  
@@ -188,7 +188,7 @@ The declaration must include declarant identity and capacity, ABN / ACN, a full 
 
 ---
 
-## Product 03 – FlexiCommercial (Secondary Assets)
+## Product 03 
 
 - **Asset**: secondary equipment ≤ 7 years at end of term.  
 - **Loan amount & borrower criteria**: identical to Product 02.  
@@ -198,7 +198,7 @@ The declaration must include declarant identity and capacity, ABN / ACN, a full 
 
 ---
 
-## Product 04 – FlexiCommercial (Tertiary Assets)
+## Product 04 
 
 - **Asset**: tertiary equipment ≤ 7 years at end of term.  
 - **Loan amount, borrower criteria and term**: same limits as Product 03.  
@@ -209,7 +209,7 @@ The declaration must include declarant identity and capacity, ABN / ACN, a full 
 
 ---
 
-## Product 05 – FlexiReplacement
+## Product 05 
 
 - **Purpose**: fund a new primary asset to replace an existing encumbered asset or refinance a balloon.  
 - **Exposure**: new aggregate exposure including existing contracts ≤ 500 000.  
@@ -226,7 +226,7 @@ The declaration must include declarant identity and capacity, ABN / ACN, a full 
 
 ---
 
-## Product 06 – FlexiAssist
+## Product 06 
 
 - **Target applicant**: Equifax score ≥ 300; may include past defaults or discharged bankrupts.  
 - **Asset**: primary or secondary up to the FC-Rule 6 age caps.  
@@ -241,7 +241,7 @@ The declaration must include declarant identity and capacity, ABN / ACN, a full 
 
 ---
 
-## Product 07 – Balloon Refinance
+## Product 07  
 
 - **Purpose**: refinance a residual or balloon amount that traditional lenders will not extend.  
 - **Asset**: primary asset ≤ 7 years old at settlement.  
@@ -255,7 +255,7 @@ The declaration must include declarant identity and capacity, ABN / ACN, a full 
 
 ---
 
-## Product 08 – FlexiPremium Special 6.95 %
+## Product 08 
 
 - **Asset**: primary asset ≤ 5 years at settlement.  
 - **Loan amount**: 50 000 – 500 000 NAF (larger deals require BDM approval).  

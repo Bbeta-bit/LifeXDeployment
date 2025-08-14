@@ -56,7 +56,6 @@
 "Applicants that do not qualify for low doc can be assessed with 6 months bank statements or financials:"
 
 - triggers:
-  - credit_score: "500 - 600"
   - exceeds_max_asset_amounts: true
   - deals_over_100k_no_credit_reference: true
   - deals_over_100k_no_property_backing: true
@@ -230,6 +229,7 @@ decision_process:
 - With Primary Asset: 36–72 months  
 - With Primary Motor Vehicle: 36–84 months  
 - Balloon Refinance: minimum 12 months
+- 0.5% rate loading applicable for terms over 60 months.
 
 #### Max Balloon Percentages
 - 36 months → up to 40%  
@@ -356,7 +356,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 ### Eligibility Criteria
 - abn_years >= 2
 - gst_years >= 1
-- credit_score_range: 500–650
+- credit_score_range: >= 500
 - asset_type: Primary 
 - property_owner：true
 
@@ -381,7 +381,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 ### Eligibility Criteria
 - abn_years >= 2
 - gst_years >= 1
-- credit_score_range: 500–650
+- credit_score_range: >= 500
 - asset_type: Primary
 - property_owner：true
 
@@ -405,7 +405,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 ### Eligibility Criteria
 - abn_years >= 2
 - gst_years >= 1
-- credit_score_range: 500–650
+- credit_score_range: >= 500
 - asset_type: Primary
 - property_owner：true
 
@@ -429,7 +429,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 ### Eligibility Criteria
 - abn_years >= 2
 - gst_years >= 1
-- credit_score_range: 500–650
+- credit_score_range: >= 500
 - asset_type: Primary 
 - property_owner：false
 
@@ -453,7 +453,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 ### Eligibility Criteria
 - abn_years >= 2
 - gst_years >= 1
-- credit_score_range: 500–650
+- credit_score_range: >= 500
 - asset_type: Primary 
 - property_owner：false
 
@@ -476,7 +476,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 ### Eligibility Criteria
 - abn_years >= 2
 - gst_years >= 1
-- credit_score_range: 500–650
+- credit_score_range: >= 500
 - asset_type: Primary 
 - property_owner：false
 
@@ -499,7 +499,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 ### Eligibility Criteria
 - abn_years >= 2
 - gst_years >= 1
-- credit_score_range: 500–650
+- credit_score_range: >= 500
 - asset_type: Secondary 
 - property_owner：true
 
@@ -523,7 +523,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 ### Eligibility Criteria
 - abn_years >= 2
 - gst_years >= 1
-- credit_score_range: 500–650
+- credit_score_range: >= 500
 - asset_type: Secondary 
 - property_owner：false
 
@@ -547,7 +547,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 ### Eligibility Criteria
 - abn_years >= 2
 - gst_years >= 1
-- credit_score_range: 500–650
+- credit_score_range: >= 500
 - asset_type: Tertiary 
 - property_owner：true
 
@@ -571,7 +571,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 ### Eligibility Criteria
 - abn_years >= 2
 - gst_years >= 1
-- credit_score_range: 500–650
+- credit_score_range: >= 500
 - asset_type: Tertiary 
 - property_owner：false
 

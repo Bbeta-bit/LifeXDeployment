@@ -18,7 +18,7 @@
   1. Private sale  
   2. Classic car  
   3. Asset age > 16 yrs at end of term  
-  4. Prime mover  
+  4. Prime mover (must be property-backed)
 
 ---
 
@@ -44,12 +44,12 @@
 
 - **Basic**  
   - ABN > 1 yr; GST > 1 yr.  
-  - Accepts property‑backed, spouse‑owned, renters or living‑with‑parents (LWP).  
+  - Accepts property‑backed, spouse‑owned (marriage or de facto relationship), renters or living‑with‑parents (LWP).  
   - Equifax: 600 (company) / 550 (guarantor) for Full‑Doc; ≥ 450 considered on referral.
 
-**Minimum deposits where borrower is not property‑backed**  
-- Motor vehicles: 10 % of purchase price.  
-- All other assets: 20 %.
+**Minimum deposits where borrower is not property-backed**  
+- Motor vehicles: 10 % of purchase price (minimum requirement for non-property-backed borrowers).  
+- All other assets: 20 % (minimum requirement for non-property-backed borrowers).
 
 ---
 
@@ -82,7 +82,7 @@
     - Lite‑Doc 150 000  
     - Full‑Doc 200 000  
 
-> Single motor‑vehicle transactions are further capped at 250 000 NAF.  All caps sit inside the global exposure limits in RA‑Rule 4.
+> Single motor‑vehicle transactions are further capped at 250 000 NAF. Single motorbike transactions capped at 75 000 NAF. All caps sit inside the global exposure limits in RA‑Rule 4.
 
 ---
 
@@ -125,7 +125,10 @@ _Note: no balloons are allowed on Secondary assets, Tertiary assets or classic c
 
 **Documentation levels**  
 - *Low‑Doc*: application & privacy consent plus asset‑and‑liability statement.  
-- *Lite‑Doc*: Low‑Doc items **+** 12‑month ATO portal history, two latest BAS portals and 90‑day bank statements on request.  
+- *Lite‑Doc*: - *Lite-Doc*: Low-Doc items **+** 12-month ATO portal history 
+  (ATO debt must be < 10 % of turnover and under an established payment plan > 3 months), 
+  two latest BAS portals (annualised turnover ≥ 2.5 × asset purchase price), 
+  and 90-day bank statements on request.  
 - *Full‑Doc*: Lite‑Doc items **+** compulsory 90‑day bank statements and recent financial statements or tax returns.
 
 **Recurring & establishment fees**  
@@ -153,7 +156,6 @@ Passenger cars, light trucks, vans/utes, classic cars (rate loading applies) and
 #### Primary assets  
 Typical examples:  
 - Heavy trucks > 4.5 t GVM  
-- Light trucks < 3.5 t GVM  
 - Trailers (including caravans)  
 - Buses and coaches  
 - Commercial motor vehicles (utes, vans, 4WDs)  
@@ -161,7 +163,7 @@ Typical examples:
 - Excavators and other “yellow‐goods”  
 - Agriculture/farming machinery  
 - Materials-handling equipment, forklifts, access lifts/boom/scissor lifts  
-- Prime movers (rate loading applies)
+- Prime movers (rate loading applies; must be property-backed)
 
 **Age limits**  
 - *Resimac*: asset may be up to **25 years** old at end-of-term  
@@ -201,18 +203,27 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 ---
 
-### RA‑Rule 9 – Key General & Credit‑Profile Criteria
+### RA-Rule 9 – Key General & Credit-Profile Criteria
 
 - Net Amount Financed (NAF) excludes fees and brokerage.  
-- Low‑Doc clients that are property‑backed may hold aggregate exposure up to 400 000 provided they have made 12 months of perfect repayments on an existing Resimac contract.  
-- Available loan terms are 12‑to‑60 months, or up to 84 months for green‑goods assets.  
-- Insurance, evidenced by Certificate of Currency, is mandatory on all advances and must name Resimac Asset Finance as interested party when NAF > 100 000.  
-- Resimac will not consider applicants with current bankruptcies or bankruptcies discharged within the last 10 years.  
-- All directors (> 40 % shareholding) must live in Australia and guarantee; shareholders > 25 % must complete AML/CTF checks.  
-- Variable‑rate contracts cannot be prepaid for more than 3 months; if prepaid further, contract is converted to fixed.  
-- Credit approval remains valid for 90 days.  
-- The aggregate exposure limit per obligor is 10 000 000.  
-- Privacy‑consent forms must be dated within 90 days of application.
+- Low-Doc clients that are property-backed may hold aggregate exposure up to 400 000 provided they have made 12 months of perfect repayments on an existing Resimac contract.  
+- Available loan terms are 12-to-60 months, or up to 84 months for green-goods assets.  
+- Insurance, evidenced by Certificate of Currency, is mandatory on all advances and must name Resimac Asset Finance as interested party when NAF > 100 000.  
+- Resimac will not consider applicants with current bankruptcies or bankruptcies discharged within the last 10 years.  
+- All directors (> 40% shareholding) must live in Australia and guarantee; shareholders > 25% must complete AML/CTF checks.  
+- Variable-rate contracts cannot be prepaid for more than 3 months; if prepaid further, contract is converted to fixed.  
+- Credit approval remains valid for 90 days.  
+- The aggregate exposure limit per obligor is 10 000 000.  
+- Privacy-consent forms must be dated within 90 days of application.
+
+**Definitions**  
+- **Equifax scores**: highest of company or guarantor is used for assessment; scores < 450 require referral or may be declined.  
+- **Cash flow lenders**: any enquiry within the last 6 months may require Lite-Doc level documentation or recent bank statements.  
+- **Credit references**:  
+  • For NAF < 100 000: provide 6 months satisfactory asset finance or mortgage statements with no missed payments.  
+  • For NAF > 100 000 (Low-Doc): must hold existing satisfactory credit facilities totalling at least 50% of the requested NAF.  
+- **Active credit file**: must exist and contain regular industry-related credit enquiries.  
+- **Prime movers**: must be property-backed; non-property-backed includes multiple encumbrances or < 25% equity in property.
 
 ---
 
@@ -284,7 +295,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 # Product Sheets
 
-## Product 01 – Vehicle Finance (0-3 yrs Motor)
+## Product 01
 
 - **Asset**: motor vehicle ≤ 3 yrs old at settlement (passenger, light truck, van / ute, motorbike; classic car attracts +2 % loading).  
 - **Tier eligibility**: PremiumPLUS, Premium, Standard, Basic (see RA-Rule 2).  
@@ -310,7 +321,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 ---
 
-## Product 02 – Vehicle Finance (> 3 yrs Motor)
+## Product 02
 
 - **Asset**: motor vehicle > 3 yrs at settlement; must be ≤ 25 yrs old at end-of-term (excludes classic > 25 yrs).  
 - **Tier eligibility & deposit**: identical to Product 01 (10 % deposit for non-property).  
@@ -326,7 +337,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 ---
 
-## Product 03 – Vehicle Finance (Electric)
+## Product 03
 
 - **Asset**: battery-electric vehicle (BEV) ≤ 25 yrs at end-of-term; hybrids not eligible.  
 - **Tier eligibility**: PremiumPLUS, Premium, Standard, Basic.  
@@ -342,7 +353,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 ---
 
-## Product 04 – Equipment Finance – Primary Assets 0-3 yrs
+## Product 04
 
 - **Asset**: primary equipment ≤ 3 yrs at settlement (heavy trucks, trailers, buses, excavators, earth-moving, ag-machinery, forklifts, boom/scissor lifts, materials-handling, caravans, prime movers).  
 - **Tier eligibility**: all four tiers; ABN / GST / score per RA-Rule 2.  
@@ -360,7 +371,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 ---
 
-## Product 05 – Equipment Finance – Primary Assets > 3 yrs
+## Product 05 
 
 - **Asset**: primary equipment older than 3 yrs at settlement but not exceeding 25 yrs at end-of-term.  
 - **Tier eligibility**: PremiumPLUS, Premium, Standard, Basic.  
@@ -376,7 +387,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 ---
 
-## Product 06 – Equipment Finance – Secondary Assets
+## Product 06 
 
 - **Asset**: secondary equipment, ≤ 10 yrs at end-of-term (generators, compressors, CNC, medical, forestry, woodworking etc.).  
 - **Tier eligibility**: PremiumPLUS, Premium, Standard, Basic.  
@@ -391,7 +402,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 ---
 
-## Product 07 – Equipment Finance – Tertiary Assets
+## Product 07
 
 - **Asset**: tertiary equipment, ≤ 5 yrs at end-of-term (AV, security, IT hardware, pallets, fit-outs, fitness, wine/beer processing, skip bins, GPS etc.).  
 - **Tier eligibility**: PremiumPLUS, Premium, Standard, Basic.  
@@ -406,7 +417,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 ---
 
-## Product 08 – Secured Business Loan (Residential Cat 1 / 2)
+## Product 08
 
 - **Security**: first-ranking mortgage over residential property in postcode category 1 or 2.  
 - **Purpose**: purchase, refinance, working capital, debt consolidation, business investment.  
@@ -432,7 +443,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 ---
 
-## Product 09 – Secured Commercial Loan (Commercial Property Cat 1 / 2)
+## Product 09 
 
 - **Security**: first-ranking mortgage over commercial property located in postcode category 1 or 2 (e.g. industrial warehouse, mixed-use, retail premises, childcare centre, office showroom, student accommodation).  
 - **Purpose**: purchase, refinance, working capital, debt consolidation, business expansion or investment.  
@@ -453,7 +464,7 @@ Fixtures and fittings; cool rooms and spray booths; refrigeration; gym machines;
 
 ---
 
-## Product 10 – Secured Commercial Loan (Other Residential Cat 3 / 4 or 2nd Mortgage)
+## Product 10
 
 - **Security options**:  
   1. First mortgage over Cat 3 or 4 residential property (houses, townhouses, apartments ≥ 50 m²) or approved boarding house.  
