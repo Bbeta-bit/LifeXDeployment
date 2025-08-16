@@ -1,62 +1,149 @@
-// Chatbot.jsx - Render部署优化版本
-import React, { useState, useRef, useEffect } from 'react';
-import { sendEnhancedMessage, checkConnection } from '../services/api.js';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { sendEnhancedMessage, checkConnection, performHealthChecks } from '../services/api.js';
 
 const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommendationUpdate, onError }) => {
+  // 状态管理
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
+  const [connectionState, setConnectionState] = useState({
+    isConnected: false,
+    isChecking: false,
+    lastCheck: null,
+    retryCount: 0
+  });
   const [sessionId, setSessionId] = useState('');
-  const [connectionError, setConnectionError] = useState(null);
-  const [debugInfo, setDebugInfo] = useState({ lastSync: null, customerInfoReceived: null });
-  
+  const [debugInfo, setDebugInfo] = useState({
+    lastSync: null,
+    customerInfoReceived: null,
+    lastApiCall: null,
+    responseTime: null
+  });
+
+  // Refs
   const chatRef = useRef(null);
   const textareaRef = useRef(null);
+  const connectionCheckInterval = useRef(null);
+  const retryTimeoutRef = useRef(null);
+
+  // 生成唯一会话ID
+  const generateSessionId = useCallback(() => {
+    return `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  }, []);
 
   // 初始化
   useEffect(() => {
-    // 创建会话ID
-    const newSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    const newSessionId = generateSessionId();
     setSessionId(newSessionId);
     
-    // 添加欢迎消息
+    // 欢迎消息
     const welcomeMessage = {
       sender: 'bot',
       text: "Hello! I'm Agent X, here to help you find the perfect loan product. Tell me about what you're looking to finance and I'll find the best options for you.",
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      type: 'welcome'
     };
     setMessages([welcomeMessage]);
     
-    // 检查连接
+    // 初始化连接
     initializeConnection();
-  }, []);
+    
+    // 清理函数
+    return () => {
+      if (connectionCheckInterval.current) {
+        clearInterval(connectionCheckInterval.current);
+      }
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+    };
+  }, [generateSessionId]);
 
-  // 初始化连接
-  const initializeConnection = async () => {
+  // 智能连接管理
+  const initializeConnection = useCallback(async () => {
+    setConnectionState(prev => ({ ...prev, isChecking: true }));
+    
     try {
       console.log('🔄 Initializing connection...');
-      const result = await checkConnection();
+      const healthChecks = await performHealthChecks();
       
-      if (result.connected) {
-        setIsConnected(true);
-        setConnectionError(null);
+      const isConnected = healthChecks.api_health;
+      
+      setConnectionState({
+        isConnected,
+        isChecking: false,
+        lastCheck: Date.now(),
+        retryCount: isConnected ? 0 : prev => prev.retryCount + 1
+      });
+
+      setDebugInfo(prev => ({
+        ...prev,
+        responseTime: healthChecks.response_time
+      }));
+
+      if (isConnected) {
         console.log('✅ Connection established');
+        // 设置定期健康检查（每2分钟）
+        if (connectionCheckInterval.current) {
+          clearInterval(connectionCheckInterval.current);
+        }
+        connectionCheckInterval.current = setInterval(performPeriodicHealthCheck, 120000);
       } else {
-        setIsConnected(false);
-        setConnectionError('Unable to connect to server');
-        console.warn('⚠️ Connection failed:', result.error);
+        console.warn('⚠️ Connection failed, will retry...');
+        scheduleRetry();
       }
+      
     } catch (error) {
-      setIsConnected(false);
-      setConnectionError('Connection initialization failed');
       console.error('❌ Connection initialization error:', error);
+      setConnectionState(prev => ({
+        ...prev,
+        isConnected: false,
+        isChecking: false,
+        retryCount: prev.retryCount + 1
+      }));
       
       if (onError) {
         onError(error);
       }
+      scheduleRetry();
     }
-  };
+  }, [onError]);
+
+  // 定期健康检查
+  const performPeriodicHealthCheck = useCallback(async () => {
+    try {
+      const result = await checkConnection();
+      if (!result.connected && connectionState.isConnected) {
+        console.warn('⚠️ Connection lost during periodic check');
+        setConnectionState(prev => ({ ...prev, isConnected: false }));
+        scheduleRetry();
+      }
+    } catch (error) {
+      console.warn('⚠️ Periodic health check failed:', error);
+    }
+  }, [connectionState.isConnected]);
+
+  // 智能重试调度
+  const scheduleRetry = useCallback(() => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+    }
+
+    // 指数退避：3秒、6秒、12秒、30秒后停止
+    const delays = [3000, 6000, 12000, 30000];
+    const retryCount = connectionState.retryCount;
+    
+    if (retryCount < delays.length) {
+      const delay = delays[retryCount];
+      console.log(`🔄 Scheduling retry ${retryCount + 1} in ${delay}ms`);
+      
+      retryTimeoutRef.current = setTimeout(() => {
+        initializeConnection();
+      }, delay);
+    } else {
+      console.log('🛑 Max retry attempts reached, stopping retries');
+    }
+  }, [connectionState.retryCount, initializeConnection]);
 
   // 客户信息同步监控
   useEffect(() => {
@@ -66,12 +153,12 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         lastSync: new Date().toISOString(),
         customerInfoReceived: Object.keys(customerInfo).length
       }));
-      console.log('📊 Customer info updated:', customerInfo);
+      console.log('📊 Customer info updated:', Object.keys(customerInfo).length, 'fields');
     }
   }, [customerInfo]);
 
-  // 发送消息
-  const handleSend = async () => {
+  // 优化的消息发送
+  const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;
 
     const currentInput = input.trim();
@@ -79,8 +166,8 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     setIsLoading(true);
 
     // 添加用户消息
-    const userMessage = { 
-      sender: 'user', 
+    const userMessage = {
+      sender: 'user',
       text: currentInput,
       timestamp: new Date().toISOString()
     };
@@ -96,6 +183,8 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     }
 
     try {
+      const startTime = Date.now();
+      
       // 构建完整对话历史
       const fullChatHistory = [
         ...conversationHistory,
@@ -105,114 +194,135 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
           timestamp: new Date().toISOString()
         }
       ];
-      
-      console.log('📤 Sending with customerInfo:', customerInfo);
-      
-      const apiResponse = await sendEnhancedMessage(currentInput, sessionId, fullChatHistory, customerInfo);
-      
+
+      console.log('📤 Sending message with context:', {
+        messageLength: currentInput.length,
+        historyLength: fullChatHistory.length,
+        customerFields: Object.keys(customerInfo || {}).length
+      });
+
+      const apiResponse = await sendEnhancedMessage(
+        currentInput, 
+        sessionId, 
+        fullChatHistory, 
+        customerInfo
+      );
+
+      const responseTime = Date.now() - startTime;
+      setDebugInfo(prev => ({
+        ...prev,
+        lastApiCall: new Date().toISOString(),
+        responseTime
+      }));
+
       // 验证响应
-      if (!apiResponse) {
-        throw new Error('Empty response from server');
+      if (!apiResponse || !apiResponse.reply) {
+        throw new Error('Invalid response from server');
       }
 
-      if (apiResponse.status === 'success' || apiResponse.status === 'basic_mode' || apiResponse.status === 'fallback') {
-        const replyText = apiResponse.reply;
+      const { reply, status, recommendations } = apiResponse;
+
+      // 处理推荐
+      if (recommendations && Array.isArray(recommendations) && recommendations.length > 0) {
+        console.log('📋 Processing recommendations:', recommendations.length);
         
-        // 处理推荐
-        if (apiResponse.recommendations && Array.isArray(apiResponse.recommendations) && apiResponse.recommendations.length > 0) {
-          console.log('📋 Received recommendations:', apiResponse.recommendations);
-          
-          // 验证推荐数据结构
-          const validRecommendations = apiResponse.recommendations.filter(rec => 
-            rec && rec.lender_name && rec.product_name && rec.base_rate !== undefined
-          );
-          
-          if (validRecommendations.length > 0 && onRecommendationUpdate) {
-            console.log('📋 Updating with valid recommendations:', validRecommendations);
-            onRecommendationUpdate(validRecommendations);
-          } else {
-            console.warn('⚠️ Received invalid recommendation data');
-          }
+        const validRecommendations = recommendations.filter(rec => 
+          rec && 
+          rec.lender_name && 
+          rec.product_name && 
+          rec.base_rate !== undefined
+        );
+
+        if (validRecommendations.length > 0 && onRecommendationUpdate) {
+          console.log('📋 Updating with valid recommendations:', validRecommendations.length);
+          onRecommendationUpdate(validRecommendations);
         }
-        
-        // 添加回复
-        const botMessage = { 
-          sender: 'bot', 
-          text: replyText,
-          timestamp: new Date().toISOString(),
-          status: apiResponse.status
-        };
-        setMessages(prev => [...prev, botMessage]);
-        
-        // 通知父组件
-        if (onNewMessage) {
-          onNewMessage({
-            role: 'assistant',
-            content: replyText,
-            timestamp: new Date().toISOString()
-          });
-        }
-        
-        // 更新调试信息
-        setDebugInfo(prev => ({
-          ...prev,
-          lastApiCall: new Date().toISOString(),
-          lastResponseStatus: apiResponse.status
-        }));
-        
-      } else {
-        // 处理API返回的错误状态
-        const errorMessage = apiResponse.reply || 'Server returned an error status';
-        throw new Error(errorMessage);
       }
-      
+
+      // 添加机器人回复
+      const botMessage = {
+        sender: 'bot',
+        text: reply,
+        timestamp: new Date().toISOString(),
+        status,
+        responseTime
+      };
+      setMessages(prev => [...prev, botMessage]);
+
+      // 通知父组件
+      if (onNewMessage) {
+        onNewMessage({
+          role: 'assistant',
+          content: reply,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // 更新连接状态（成功的API调用表示连接正常）
+      if (!connectionState.isConnected) {
+        setConnectionState(prev => ({
+          ...prev,
+          isConnected: true,
+          retryCount: 0
+        }));
+      }
+
     } catch (error) {
       console.error('❌ Send failed:', error);
-      
-      // 智能的错误处理和用户友好的错误消息
+
+      // 智能错误处理
       let errorMessage = "I'm having trouble connecting. Please try again in a moment.";
-      
-      if (error.name === 'AbortError' || error.message.includes('timeout')) {
+      let shouldRetryConnection = false;
+
+      if (error.message.includes('timeout') || error.message.includes('AbortError')) {
         errorMessage = "Request timed out. The server might be busy. Please try again.";
       } else if (error.message.includes('HTTP 429')) {
         errorMessage = "Server is currently busy. Please wait a moment and try again.";
       } else if (error.message.includes('HTTP 500')) {
         errorMessage = "There's a temporary server issue. Please try again in a few minutes.";
       } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-        errorMessage = "Network connection issue. Please check your internet connection and try again.";
-        // 标记为未连接，下次会自动重连
-        setIsConnected(false);
-      } else if (error.message.includes('Unable to connect')) {
-        errorMessage = error.message;
-        setIsConnected(false);
+        errorMessage = "Network connection issue. Please check your connection.";
+        shouldRetryConnection = true;
       }
-      
-      const botErrorMessage = { 
-        sender: 'bot', 
+
+      // 添加错误消息
+      const errorBotMessage = {
+        sender: 'bot',
         text: errorMessage,
         timestamp: new Date().toISOString(),
         isError: true
       };
-      
-      setMessages(prev => [...prev, botErrorMessage]);
-      
+      setMessages(prev => [...prev, errorBotMessage]);
+
+      // 更新连接状态
+      if (shouldRetryConnection) {
+        setConnectionState(prev => ({
+          ...prev,
+          isConnected: false
+        }));
+        scheduleRetry();
+      }
+
       // 通知父组件错误
       if (onError) {
         onError(error);
       }
-      
-      // 更新调试信息
-      setDebugInfo(prev => ({
-        ...prev,
-        lastApiCall: new Date().toISOString(),
-        lastResponseStatus: 'error',
-        lastError: error.message
-      }));
-      
+
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [
+    input, 
+    isLoading, 
+    sessionId, 
+    conversationHistory, 
+    customerInfo, 
+    onNewMessage, 
+    onRecommendationUpdate, 
+    onError, 
+    connectionState.isConnected,
+    scheduleRetry
+  ]);
 
   // 自动滚动
   useEffect(() => {
@@ -222,26 +332,76 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
   }, [messages]);
 
   // 输入处理
-  const handleInputChange = (e) => {
+  const handleInputChange = useCallback((e) => {
     setInput(e.target.value);
+    
+    // 自动调整文本域高度
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
     }
-  };
+  }, []);
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  };
+  }, [handleSend]);
 
-  // 重连功能
-  const handleReconnect = async () => {
-    setConnectionError(null);
-    await initializeConnection();
-  };
+  // 手动重连
+  const handleReconnect = useCallback(() => {
+    setConnectionState(prev => ({ ...prev, retryCount: 0 }));
+    initializeConnection();
+  }, [initializeConnection]);
+
+  // 连接状态指示器
+  const connectionIndicator = useMemo(() => {
+    const { isConnected, isChecking } = connectionState;
+    
+    if (isChecking) {
+      return { color: 'bg-yellow-500', text: 'Connecting...' };
+    } else if (isConnected) {
+      return { color: 'bg-green-500', text: 'Connected' };
+    } else {
+      return { color: 'bg-red-500', text: 'Disconnected' };
+    }
+  }, [connectionState]);
+
+  // 消息渲染优化
+  const renderMessage = useCallback((message, index) => (
+    <div
+      key={`${message.timestamp}-${index}`}
+      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+    >
+      <div
+        className={`px-5 py-3 rounded-2xl max-w-[75%] whitespace-pre-wrap text-base ${
+          message.sender === 'user' 
+            ? 'bg-blue-600 text-white shadow-lg' 
+            : message.isError
+            ? 'bg-red-50 border border-red-200 text-red-700'
+            : 'bg-white border shadow-lg'
+        }`}
+      >
+        {message.text}
+        
+        {/* 状态指示器 */}
+        {message.status && message.status !== 'success' && (
+          <div className="text-xs mt-1 opacity-60">
+            {message.status === 'basic_mode' && '(Basic Mode)'}
+            {message.status === 'fallback' && '(Limited Service)'}
+          </div>
+        )}
+        
+        {/* 响应时间（开发模式） */}
+        {process.env.NODE_ENV === 'development' && message.responseTime && (
+          <div className="text-xs mt-1 opacity-50">
+            {message.responseTime}ms
+          </div>
+        )}
+      </div>
+    </div>
+  ), []);
 
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: '#fef7e8' }}>
@@ -250,40 +410,32 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold text-gray-800">Agent X</h1>
           
-          {/* 连接状态指示器 */}
+          {/* 连接状态 */}
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <div className={`w-2 h-2 rounded-full ${connectionIndicator.color}`}></div>
             <span className="text-xs text-gray-600">
-              {isConnected ? 'Connected' : 'Disconnected'}
+              {connectionIndicator.text}
             </span>
+            {!connectionState.isConnected && !connectionState.isChecking && (
+              <button
+                onClick={handleReconnect}
+                className="text-xs text-blue-600 hover:text-blue-800 ml-2"
+              >
+                Retry
+              </button>
+            )}
           </div>
           
-          {/* 调试信息显示（开发模式） */}
+          {/* 调试信息 */}
           {process.env.NODE_ENV === 'development' && (
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-gray-500 text-right">
               <div>Sync: {debugInfo.lastSync ? new Date(debugInfo.lastSync).toLocaleTimeString() : 'None'}</div>
-              <div>Info: {debugInfo.customerInfoReceived || 0} fields</div>
+              <div>Fields: {debugInfo.customerInfoReceived || 0}</div>
+              <div>Response: {debugInfo.responseTime ? `${debugInfo.responseTime}ms` : 'N/A'}</div>
             </div>
           )}
         </div>
       </div>
-
-      {/* 连接错误提示 */}
-      {connectionError && !isConnected && (
-        <div className="mx-6 mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <div className="flex items-center justify-between">
-            <div className="text-yellow-700 text-sm">
-              Connection issue detected. Some features may be limited.
-            </div>
-            <button
-              onClick={handleReconnect}
-              className="text-yellow-600 hover:text-yellow-800 text-sm underline"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* 聊天区域 */}
       <div
@@ -291,32 +443,9 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         className="flex-1 overflow-y-auto px-6 py-6 space-y-4"
         style={{ backgroundColor: '#fef7e8' }}
       >
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`px-5 py-3 rounded-2xl max-w-[75%] whitespace-pre-wrap text-base ${
-                m.sender === 'user' 
-                  ? 'bg-blue-600 text-white shadow-lg' 
-                  : m.isError
-                  ? 'bg-red-50 border border-red-200 text-red-700'
-                  : 'bg-white border shadow-lg'
-              }`}
-            >
-              {m.text}
-              {/* 显示状态（如果有） */}
-              {m.status && m.status !== 'success' && (
-                <div className="text-xs mt-1 opacity-60">
-                  {m.status === 'basic_mode' && '(Basic Mode)'}
-                  {m.status === 'fallback' && '(Limited Service)'}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
+        {messages.map(renderMessage)}
         
+        {/* 加载指示器 */}
         {isLoading && (
           <div className="flex justify-start">
             <div className="px-5 py-3 rounded-2xl bg-white border text-gray-500 shadow-lg">
@@ -341,16 +470,20 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
             rows={1}
             placeholder={
               isLoading ? "Sending..." :
-              !isConnected ? "Reconnecting..." :
+              connectionState.isChecking ? "Connecting..." :
+              !connectionState.isConnected ? "Reconnecting..." :
               "Type your message..."
             }
-            disabled={isLoading}
-            className="w-full p-4 pr-16 rounded-xl border border-gray-300 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-            style={{ maxHeight: '150px' }}
+            disabled={isLoading || connectionState.isChecking}
+            className="w-full p-4 pr-16 rounded-xl border border-gray-300 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed transition-all"
+            style={{ 
+              maxHeight: '120px',
+              minHeight: '52px'
+            }}
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isLoading}
+            disabled={!input.trim() || isLoading || !connectionState.isConnected}
             className="absolute right-2 top-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -364,4 +497,4 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
   );
 };
 
-export default Chatbot;
+export default React.memo(Chatbot);
