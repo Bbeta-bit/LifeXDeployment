@@ -1,4 +1,4 @@
-# enhanced_memory_conversation_service.py
+# enhanced_memory_conversation_service.py - 修复后的完整版本
 from typing import Dict, List, Any, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
@@ -39,7 +39,7 @@ class CustomerInformation:
     # Business information
     business_type: Optional[str] = None
     business_age: Optional[int] = None
-    business_structure: Optional[str] = None
+    business_structure: Optional[str] = None  # 🔧 修复：确保business_structure字段存在
     
     # Preferences
     interest_rate_ceiling: Optional[float] = None
@@ -71,8 +71,15 @@ class CustomerInformation:
                 field_name in self.confirmed_fields)
     
     def get_missing_core_fields(self) -> List[str]:
-        """Get missing core MVP fields"""
-        core_fields = ["loan_type", "asset_type", "property_status", "ABN_years", "GST_years"]
+        """🔧 修复：获取缺失的核心MVP字段，包含business_structure"""
+        core_fields = [
+            "loan_type", 
+            "asset_type", 
+            "business_structure",  # 🔧 修复：添加为核心字段
+            "property_status", 
+            "ABN_years", 
+            "GST_years"
+        ]
         return [field for field in core_fields if not self.is_field_complete(field)]
     
     def get_missing_important_fields(self) -> List[str]:
@@ -89,216 +96,342 @@ class ConversationMemory:
     conversation_history: List[Dict[str, str]] = field(default_factory=list)
     last_questions: List[str] = field(default_factory=list)  # Recently asked questions
     topics_discussed: Set[str] = field(default_factory=set)  # Topics covered
-    clarifications_needed: Dict[str, str] = field(default_factory=dict)  # Info needing clarification
+    clarifications_needed: Dict[str, str] = field(default_factory=dict)  # Field -> reason
     conversation_round: int = 0
     last_updated: datetime = field(default_factory=datetime.now)
     
     def add_message(self, role: str, content: str):
-        """Add conversation record"""
+        """Add message to conversation history"""
         self.conversation_history.append({
             "role": role,
             "content": content,
             "timestamp": datetime.now().isoformat()
         })
+        self.conversation_round += 1
         self.last_updated = datetime.now()
     
-    def add_question(self, question: str):
-        """Record question asked"""
+    def add_question_asked(self, question: str):
+        """Track questions that have been asked"""
         self.last_questions.append(question)
-        # Keep only last 5 questions
+        # Keep only last 5 questions to avoid memory bloat
         if len(self.last_questions) > 5:
-            self.last_questions.pop(0)
-    
-    def was_recently_asked(self, field_name: str) -> bool:
-        """Check if field was asked in recent questions"""
-        field_keywords = {
-            "credit_score": ["credit", "score"],
-            "loan_amount": ["amount", "borrow"],
-            "property_status": ["property", "own"],
-            "ABN_years": ["ABN", "years"],
-            "GST_years": ["GST", "registered"]
-        }
-        
-        keywords = field_keywords.get(field_name, [field_name])
-        recent_questions = " ".join(self.last_questions[-3:])  # Check last 3 questions
-        
-        return any(keyword.lower() in recent_questions.lower() for keyword in keywords)
+            self.last_questions = self.last_questions[-5:]
 
 class EnhancedMemoryService:
-    """Enhanced memory service with anti-repetition capabilities"""
+    """Enhanced memory service with anti-repetition and context awareness"""
     
     def __init__(self):
         self.sessions: Dict[str, ConversationMemory] = {}
-        self.field_patterns = self._init_field_patterns()
-    
-    def _init_field_patterns(self) -> Dict[str, List[str]]:
-        """Initialize field recognition patterns"""
-        return {
-            "credit_score": [
-                r"credit score.{0,20}?(\d{3,4})",
-                r"score.{0,10}?(\d{3,4})",
-                r"my score is (\d{3,4})"
+        
+        # 🔧 修复：增强的业务结构提取模式
+        self.business_structure_patterns = {
+            'sole_trader': [
+                r'sole\s*trader', r'individual\s*trader', r'self\s*employed',
+                r'operating\s*as\s*an\s*individual', r'trading\s*individually'
             ],
-            "desired_loan_amount": [
-                r"(?:need|want|looking for|borrow).{0,20}?\$?(\d+(?:,\d{3})*)",
-                r"\$(\d+(?:,\d{3})*)",
-                r"(\d+)k",
-                r"(\d+) thousand"
+            'company': [
+                r'company', r'pty\s*ltd', r'corporation', r'incorporated',
+                r'\bltd\b', r'corporate\s*entity', r'limited\s*company'
             ],
-            "ABN_years": [
-                r"ABN.{0,20}?(\d+)\s*years?",
-                r"registered.{0,20}?(\d+)\s*years?",
-                r"(\d+)\s*years?.{0,20}?ABN"
+            'partnership': [
+                r'partnership', r'partners', r'joint\s*venture',
+                r'business\s*partnership', r'trading\s*partnership'
             ],
-            "GST_years": [
-                r"GST.{0,20}?(\d+)\s*years?",
-                r"(\d+)\s*years?.{0,20}?GST"
-            ],
-            "property_status": [
-                r"(?:own|have).{0,10}?property",
-                r"property owner",
-                r"no property",
-                r"don't own",
-                r"rent"
+            'trust': [
+                r'trust', r'family\s*trust', r'discretionary\s*trust',
+                r'unit\s*trust', r'trustee', r'trading\s*trust'
             ]
         }
     
     def get_or_create_session(self, session_id: str) -> ConversationMemory:
-        """Get or create session memory"""
+        """Get existing session or create new one"""
         if session_id not in self.sessions:
             self.sessions[session_id] = ConversationMemory(session_id=session_id)
         return self.sessions[session_id]
     
-    def extract_information_from_message(self, session_id: str, user_message: str) -> Dict[str, Any]:
-        """Extract information from user message"""
+    def update_customer_information(self, session_id: str, extracted_info: Dict[str, Any]):
+        """🔧 修复：更新客户信息，包含业务结构处理"""
         memory = self.get_or_create_session(session_id)
+        
+        for field, value in extracted_info.items():
+            if hasattr(memory.customer_info, field) and value is not None:
+                # 验证业务结构值
+                if field == 'business_structure':
+                    if value in ['sole_trader', 'company', 'partnership', 'trust']:
+                        memory.customer_info.update_field(field, value)
+                        print(f"🏢 Updated business structure: {value}")
+                    else:
+                        print(f"⚠️ Invalid business structure value: {value}")
+                else:
+                    memory.customer_info.update_field(field, value)
+    
+    def extract_information_from_message(self, session_id: str, user_message: str) -> Dict[str, Any]:
+        """🔧 修复：从用户消息中提取信息，包含增强的业务结构提取"""
         extracted = {}
+        message_lower = user_message.lower()
         
-        # Use regex patterns to extract information
-        for field_name, patterns in self.field_patterns.items():
-            if not memory.customer_info.is_field_complete(field_name):
-                for pattern in patterns:
-                    match = re.search(pattern, user_message, re.IGNORECASE)
-                    if match:
-                        try:
-                            if field_name in ["credit_score", "ABN_years", "GST_years"]:
-                                extracted[field_name] = int(match.group(1))
-                            elif field_name == "desired_loan_amount":
-                                amount_str = match.group(1).replace(",", "")
-                                if "k" in user_message.lower() or "thousand" in user_message.lower():
-                                    extracted[field_name] = float(amount_str) * 1000
-                                else:
-                                    extracted[field_name] = float(amount_str)
-                            elif field_name == "property_status":
-                                if any(word in match.group(0).lower() for word in ["own", "have"]):
-                                    extracted[field_name] = "property_owner"
-                                else:
-                                    extracted[field_name] = "non_property_owner"
-                            break
-                        except (ValueError, IndexError):
-                            continue
+        # 🔧 修复：业务结构提取
+        for structure, patterns in self.business_structure_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, message_lower, re.IGNORECASE):
+                    extracted['business_structure'] = structure
+                    print(f"🏢 Extracted business structure: {structure}")
+                    break
+            if 'business_structure' in extracted:
+                break
         
-        # Update customer information
-        for field_name, value in extracted.items():
-            memory.customer_info.update_field(field_name, value)
+        # 贷款类型提取
+        if any(phrase in message_lower for phrase in ['business loan', 'commercial loan', 'asset finance']):
+            extracted['loan_type'] = 'business'
+        elif any(phrase in message_lower for phrase in ['personal loan', 'consumer loan']):
+            extracted['loan_type'] = 'consumer'
+        
+        # 资产类型提取
+        asset_keywords = {
+            'motor_vehicle': ['car', 'vehicle', 'truck', 'van', 'ute', 'motorcycle', 'auto'],
+            'primary': ['primary equipment', 'main equipment', 'core machinery'],
+            'secondary': ['secondary equipment', 'generator', 'compressor'],
+            'tertiary': ['tertiary equipment', 'computer', 'IT equipment']
+        }
+        
+        for asset_type, keywords in asset_keywords.items():
+            if any(keyword in message_lower for keyword in keywords):
+                extracted['asset_type'] = asset_type
+                break
+        
+        # 房产状态提取
+        if any(phrase in message_lower for phrase in ['own property', 'property owner', 'have property']):
+            extracted['property_status'] = 'property_owner'
+        elif any(phrase in message_lower for phrase in ["don't own property", "no property", 'rent']):
+            extracted['property_status'] = 'non_property_owner'
+        
+        # 车辆状况提取
+        if any(phrase in message_lower for phrase in ['new car', 'brand new', 'new vehicle']):
+            extracted['vehicle_condition'] = 'new'
+        elif any(phrase in message_lower for phrase in ['used car', 'second hand', 'pre-owned']):
+            extracted['vehicle_condition'] = 'used'
+        elif any(phrase in message_lower for phrase in ['demo', 'demonstrator']):
+            extracted['vehicle_condition'] = 'demonstrator'
+        
+        # 数值提取
+        # ABN年限
+        abn_match = re.search(r'abn.{0,20}(\d+).{0,10}year', message_lower)
+        if abn_match:
+            extracted['ABN_years'] = int(abn_match.group(1))
+        
+        # GST年限
+        gst_match = re.search(r'gst.{0,20}(\d+).{0,10}year', message_lower)
+        if gst_match:
+            extracted['GST_years'] = int(gst_match.group(1))
+        
+        # 信用分数
+        credit_match = re.search(r'credit.{0,20}(\d{3,4})', message_lower)
+        if credit_match:
+            score = int(credit_match.group(1))
+            if 300 <= score <= 900:
+                extracted['credit_score'] = score
+        
+        # 🔧 修复：增强的贷款金额提取
+        amount_patterns = [
+            r'[\$](\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
+            r'(\d{1,3}(?:,\d{3})*)\s*(?:dollars?|k|thousand)',
+            r'borrow\s*(\d{1,3}(?:,\d{3})*)',
+            r'loan\s*(?:of|for)?\s*[\$]?(\d{1,3}(?:,\d{3})*)'
+        ]
+        
+        for pattern in amount_patterns:
+            matches = re.findall(pattern, user_message.replace(',', ''))
+            if matches:
+                amounts = []
+                for match in matches:
+                    try:
+                        amount = float(match.replace(',', ''))
+                        if amount > 1000:  # 过滤小数字
+                            amounts.append(amount)
+                    except ValueError:
+                        continue
+                
+                if amounts:
+                    extracted['desired_loan_amount'] = max(amounts)
+                    break
+        
+        # 更新内存中的客户信息
+        if extracted:
+            self.update_customer_information(session_id, extracted)
         
         return extracted
     
-    def should_ask_field(self, session_id: str, field_name: str) -> bool:
-        """Determine if field should be asked"""
+    def get_next_questions(self, session_id: str, max_questions: int = 2) -> List[str]:
+        """🔧 修复：获取下一个要问的问题，优先business_structure"""
         memory = self.get_or_create_session(session_id)
         
-        # Don't ask if field is already complete
-        if memory.customer_info.is_field_complete(field_name):
-            return False
-        
-        # Don't ask if recently asked
-        if memory.was_recently_asked(field_name):
-            return False
-        
-        # Don't ask if asked too many times already
-        if field_name in memory.customer_info.asked_fields:
-            asked_count = sum(1 for q in memory.last_questions 
-                            if any(keyword in q.lower() 
-                                 for keyword in self._get_field_keywords(field_name)))
-            if asked_count >= 2:  # Maximum 2 attempts
-                return False
-        
-        return True
-    
-    def _get_field_keywords(self, field_name: str) -> List[str]:
-        """Get keywords related to field"""
-        keywords_map = {
-            "credit_score": ["credit", "score"],
-            "desired_loan_amount": ["amount", "borrow", "loan"],
-            "property_status": ["property", "own"],
-            "ABN_years": ["ABN", "years"],
-            "GST_years": ["GST", "years"]
-        }
-        return keywords_map.get(field_name, [field_name])
-    
-    def get_next_questions(self, session_id: str, max_questions: int = 1) -> List[str]:
-        """Get next questions to ask"""
-        memory = self.get_or_create_session(session_id)
-        questions = []
-        
-        # Priority order
-        field_priority = [
-            ("loan_type", "Is this loan for business/commercial use or personal use?"),
-            ("credit_score", "What is your current credit score?"),
-            ("desired_loan_amount", "How much are you looking to borrow?"),
-            ("asset_type", "What type of asset are you looking to finance? (e.g., vehicle, primary equipment, secondary equipment)"),
-            ("property_status", "Do you currently own property?"),
+        # 定义问题优先级，business_structure提前
+        question_priority = [
+            ("loan_type", "What type of loan are you looking for? (business/consumer)"),
+            ("asset_type", "What type of asset are you looking to finance?"),
+            ("business_structure", "What is your business structure? (sole trader/company/partnership/trust)"),
+            ("property_status", "Do you own property?"),
             ("ABN_years", "How many years has your ABN been registered?"),
-            ("GST_years", "How many years have you been registered for GST? (Enter 0 if not registered)")
+            ("GST_years", "How many years have you been registered for GST?"),
+            ("credit_score", "What is your current credit score?"),
+            ("desired_loan_amount", "How much would you like to borrow?")
         ]
         
-        for field_name, question in field_priority:
-            if len(questions) >= max_questions:
-                break
-            if self.should_ask_field(session_id, field_name):
-                questions.append(question)
-                memory.customer_info.mark_field_asked(field_name)
-                memory.add_question(question)
+        # 添加车辆相关问题（如果适用）
+        if memory.customer_info.asset_type == 'motor_vehicle':
+            vehicle_questions = [
+                ("vehicle_type", "What type of vehicle? (passenger car/truck/van/motorcycle)"),
+                ("vehicle_condition", "Are you looking at new or used vehicles?"),
+                ("vehicle_make", "What make of vehicle?"),
+                ("vehicle_model", "What model of vehicle?")
+            ]
+            # 在credit_score之前插入车辆问题
+            insert_index = next(i for i, (field, _) in enumerate(question_priority) if field == "credit_score")
+            for i, (field, question) in enumerate(vehicle_questions):
+                question_priority.insert(insert_index + i, (field, question))
         
-        return questions
+        next_questions = []
+        
+        for field, question in question_priority:
+            # 检查字段是否已完成或最近已问过
+            if (not memory.customer_info.is_field_complete(field) and 
+                field not in memory.customer_info.asked_fields and
+                question not in memory.last_questions[-2:]):  # 避免重复最近2个问题
+                
+                next_questions.append(question)
+                memory.customer_info.mark_field_asked(field)
+                memory.add_question_asked(question)
+                
+                if len(next_questions) >= max_questions:
+                    break
+        
+        return next_questions
+    
+    def should_reset_session(self, session_id: str, user_message: str) -> bool:
+        """🔧 修复2：检测是否应该重置会话"""
+        reset_patterns = [
+            r'new\s*(loan|application)',
+            r'different\s*(loan|finance)', 
+            r'start\s*over',
+            r'fresh\s*start',
+            r'another\s*(loan|quote)',
+            r'completely\s*different'
+        ]
+        
+        message_lower = user_message.lower()
+        
+        for pattern in reset_patterns:
+            if re.search(pattern, message_lower):
+                print(f"🔄 Session reset detected: {pattern}")
+                return True
+        
+        return False
+    
+    def reset_session(self, session_id: str):
+        """🔧 修复2：重置会话状态"""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            print(f"🔄 Session {session_id} has been reset")
+    
+    def detect_loan_amount_change(self, session_id: str, user_message: str) -> Optional[float]:
+        """🔧 修复3：检测贷款金额变更请求"""
+        change_patterns = [
+            r'change.{0,20}amount.{0,20}to.{0,10}[\$]?(\d{1,3}(?:,?\d{3})*)',
+            r'loan.{0,20}amount.{0,20}[\$]?(\d{1,3}(?:,?\d{3})*)',
+            r'(\d{1,3}(?:,?\d{3})*).{0,20}instead',
+            r'update.{0,20}to.{0,10}[\$]?(\d{1,3}(?:,?\d{3})*)'
+        ]
+        
+        message_lower = user_message.lower().replace(',', '')
+        
+        for pattern in change_patterns:
+            match = re.search(pattern, message_lower)
+            if match:
+                try:
+                    new_amount = float(match.group(1).replace(',', ''))
+                    if new_amount > 10000:  # 确保是合理的金额
+                        print(f"💰 Detected loan amount change request: ${new_amount:,}")
+                        return new_amount
+                except (ValueError, IndexError):
+                    continue
+        
+        return None
     
     def create_context_aware_prompt(self, session_id: str, user_message: str) -> str:
-        """Create context-aware prompt with memory"""
+        """Create context-aware prompt with memory and anti-repetition"""
         memory = self.get_or_create_session(session_id)
         
-        # Add user message to history
-        memory.add_message("user", user_message)
-        memory.conversation_round += 1
+        # 检查是否需要重置会话
+        if self.should_reset_session(session_id, user_message):
+            self.reset_session(session_id)
+            memory = self.get_or_create_session(session_id)  # 创建新会话
         
-        # Extract information
+        # 提取当前消息中的信息
         extracted_info = self.extract_information_from_message(session_id, user_message)
         
-        # Build context information
-        context_info = {
-            "collected_information": self._format_collected_info(memory),
-            "missing_information": self._format_missing_info(memory),
-            "recent_questions": memory.last_questions[-2:] if memory.last_questions else [],
-            "conversation_round": memory.conversation_round,
-            "current_stage": memory.stage.value
-        }
+        # 检查贷款金额变更
+        amount_change = self.detect_loan_amount_change(session_id, user_message)
+        if amount_change:
+            memory.customer_info.update_field('desired_loan_amount', amount_change)
+            extracted_info['desired_loan_amount'] = amount_change
+            extracted_info['_amount_change_request'] = True
         
-        # Generate anti-repetition instructions
-        avoid_repetition_instruction = self._generate_avoid_repetition_instruction(memory)
+        # 构建上下文感知提示
+        context_sections = []
         
-        return f"""
-## CONVERSATION MEMORY CONTEXT
-{json.dumps(context_info, ensure_ascii=False, indent=2)}
-
-## CRITICAL ANTI-REPETITION INSTRUCTIONS
-{avoid_repetition_instruction}
-
+        # 会话基本信息
+        context_sections.append(f"""
+## SESSION CONTEXT
+Session ID: {session_id}
+Conversation Round: {memory.conversation_round}
+Current Stage: {memory.stage.value}
+Last Updated: {memory.last_updated.strftime('%Y-%m-%d %H:%M:%S')}
+""")
+        
+        # 已收集的客户信息
+        collected_info = self._format_collected_info(memory)
+        if collected_info:
+            context_sections.append(f"""
+## COLLECTED CUSTOMER INFORMATION
+{json.dumps(collected_info, ensure_ascii=False, indent=2)}
+""")
+        
+        # 缺失信息
+        missing_info = self._format_missing_info(memory)
+        if missing_info:
+            context_sections.append(f"""
+## MISSING INFORMATION
+Core Fields: {memory.customer_info.get_missing_core_fields()}
+Important Fields: {memory.customer_info.get_missing_important_fields()}
+""")
+        
+        # 防重复指令
+        repetition_instructions = self._generate_avoid_repetition_instruction(memory)
+        context_sections.append(f"""
+## ANTI-REPETITION GUIDELINES
+{repetition_instructions}
+""")
+        
+        # 下一步建议
+        next_questions = self.get_next_questions(memory.session_id, max_questions=2)
+        if next_questions:
+            context_sections.append(f"➡️ NEXT QUESTIONS TO ASK: {next_questions}")
+        else:
+            context_sections.append("➡️ INFORMATION COLLECTION COMPLETE - PROCEED TO PRODUCT MATCHING")
+        
+        # 当前提取的信息
+        if extracted_info:
+            context_sections.append(f"""
 ## NEWLY EXTRACTED INFORMATION
-{json.dumps(extracted_info, ensure_ascii=False, indent=2) if extracted_info else "No new information"}
-
+{json.dumps(extracted_info, ensure_ascii=False, indent=2)}
+""")
+        
+        context_sections.append(f"""
 ## CURRENT USER MESSAGE
 {user_message}
-"""
+""")
+        
+        return "\n".join(context_sections)
     
     def _format_collected_info(self, memory: ConversationMemory) -> Dict[str, Any]:
         """Format collected information"""
@@ -331,13 +464,6 @@ class EnhancedMemoryService:
             recent_questions = memory.last_questions[-2:]
             instructions.append(f"🚫 RECENTLY ASKED (DO NOT REPEAT): {recent_questions}")
         
-        # Add next step suggestions
-        next_questions = self.get_next_questions(memory.session_id, max_questions=2)
-        if next_questions:
-            instructions.append(f"➡️ NEXT QUESTIONS TO ASK: {next_questions}")
-        else:
-            instructions.append("➡️ INFORMATION COLLECTION COMPLETE - PROCEED TO PRODUCT MATCHING")
-        
         return "\n".join(instructions)
     
     def update_conversation_stage(self, session_id: str, new_stage: ConversationStage):
@@ -368,3 +494,7 @@ class EnhancedMemoryService:
         """Clear session memory"""
         if session_id in self.sessions:
             del self.sessions[session_id]
+            print(f"🗑️ Cleared session: {session_id}")
+
+# 保持向后兼容性的别名
+ConversationFlowService = EnhancedMemoryService
