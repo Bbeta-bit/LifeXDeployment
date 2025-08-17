@@ -32,7 +32,7 @@ const FunctionBar = ({ activePanel, setActivePanel }) => {
             }`} />
           </Button>
           
-          {/* 🔧 改进的悬停提示 */}
+          {/* 原始的悬停提示 */}
           <div className="absolute left-14 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none">
             <div className="bg-gray-900 text-white text-sm rounded-lg px-3 py-2 whitespace-nowrap shadow-lg">
               <div className="font-medium">{label}</div>
@@ -45,18 +45,8 @@ const FunctionBar = ({ activePanel, setActivePanel }) => {
         </div>
       ))}
 
-      {/* 🔧 底部装饰和状态指示 */}
+      {/* 底部装饰 */}
       <div className="flex-1"></div>
-      
-      {/* 活跃面板指示 */}
-      {activePanel && (
-        <div className="text-center">
-          <div className="w-1 h-8 bg-blue-600 rounded-full mx-auto mb-2"></div>
-          <div className="text-xs text-gray-500 transform -rotate-90 whitespace-nowrap">
-            Active
-          </div>
-        </div>
-      )}
       
       <div className="w-8 h-0.5 bg-gradient-to-r from-transparent via-gray-300 to-transparent"></div>
     </div>
@@ -64,5 +54,3 @@ const FunctionBar = ({ activePanel, setActivePanel }) => {
 };
 
 export default FunctionBar;
-
-

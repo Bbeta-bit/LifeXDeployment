@@ -45,6 +45,16 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     };
     setMessages([welcomeMessage]);
     
+    // 🔧 确保初始消息传递给App组件
+    if (onNewMessage) {
+      onNewMessage({
+        content: welcomeMessage.text,
+        sender: 'bot',
+        timestamp: welcomeMessage.timestamp,
+        type: 'welcome'
+      });
+    }
+    
     // 初始化连接
     initializeConnection();
     
@@ -57,7 +67,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         clearTimeout(retryTimeoutRef.current);
       }
     };
-  }, [generateSessionId]);
+  }, [generateSessionId, onNewMessage]);
 
   // 智能连接管理
   const initializeConnection = useCallback(async () => {
@@ -75,343 +85,348 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         lastCheck: Date.now(),
         retryCount: isConnected ? 0 : prev => prev.retryCount + 1
       });
-
-      setDebugInfo(prev => ({
-        ...prev,
-        responseTime: healthChecks.response_time
-      }));
-
+      
       if (isConnected) {
-        console.log('✅ Connection established');
-        // 设置定期健康检查（每2分钟）
-        if (connectionCheckInterval.current) {
-          clearInterval(connectionCheckInterval.current);
-        }
-        connectionCheckInterval.current = setInterval(performPeriodicHealthCheck, 120000);
+        console.log('✅ Connection established successfully');
+        // 定期健康检查
+        startHealthCheckInterval();
       } else {
-        console.warn('⚠️ Connection failed, will retry...');
+        console.log('❌ Connection failed, scheduling retry...');
         scheduleRetry();
       }
       
     } catch (error) {
-      console.error('❌ Connection initialization error:', error);
+      console.error('❌ Connection error:', error);
       setConnectionState(prev => ({
         ...prev,
         isConnected: false,
         isChecking: false,
         retryCount: prev.retryCount + 1
       }));
-      
-      if (onError) {
-        onError(error);
-      }
       scheduleRetry();
     }
-  }, [onError]);
+  }, []);
 
   // 定期健康检查
-  const performPeriodicHealthCheck = useCallback(async () => {
-    try {
-      const result = await checkConnection();
-      if (!result.connected && connectionState.isConnected) {
-        console.warn('⚠️ Connection lost during periodic check');
-        setConnectionState(prev => ({ ...prev, isConnected: false }));
+  const startHealthCheckInterval = useCallback(() => {
+    if (connectionCheckInterval.current) {
+      clearInterval(connectionCheckInterval.current);
+    }
+    
+    connectionCheckInterval.current = setInterval(async () => {
+      try {
+        const healthChecks = await performHealthChecks();
+        const isConnected = healthChecks.api_health;
+        
+        setConnectionState(prev => ({
+          ...prev,
+          isConnected,
+          lastCheck: Date.now()
+        }));
+        
+        if (!isConnected) {
+          console.log('🔄 Connection lost, attempting reconnection...');
+          scheduleRetry();
+        }
+      } catch (error) {
+        console.error('🔄 Health check failed:', error);
+        setConnectionState(prev => ({
+          ...prev,
+          isConnected: false,
+          lastCheck: Date.now()
+        }));
         scheduleRetry();
       }
-    } catch (error) {
-      console.warn('⚠️ Periodic health check failed:', error);
-    }
-  }, [connectionState.isConnected]);
+    }, 30000); // 每30秒检查一次
+  }, []);
 
-  // 智能重试调度
+  // 重试机制
   const scheduleRetry = useCallback(() => {
     if (retryTimeoutRef.current) {
       clearTimeout(retryTimeoutRef.current);
     }
-
-    // 指数退避：3秒、6秒、12秒、30秒后停止
-    const delays = [3000, 6000, 12000, 30000];
-    const retryCount = connectionState.retryCount;
     
-    if (retryCount < delays.length) {
-      const delay = delays[retryCount];
-      console.log(`🔄 Scheduling retry ${retryCount + 1} in ${delay}ms`);
-      
-      retryTimeoutRef.current = setTimeout(() => {
-        initializeConnection();
-      }, delay);
-    } else {
-      console.log('🛑 Max retry attempts reached, stopping retries');
-    }
+    const retryDelay = Math.min(5000 * Math.pow(2, connectionState.retryCount), 30000);
+    console.log(`🔄 Scheduling retry in ${retryDelay}ms...`);
+    
+    retryTimeoutRef.current = setTimeout(() => {
+      initializeConnection();
+    }, retryDelay);
   }, [connectionState.retryCount, initializeConnection]);
 
-  // 客户信息同步监控
+  // 🔧 修复：确保conversationHistory同步到本地messages
   useEffect(() => {
-    if (customerInfo && Object.keys(customerInfo).length > 0) {
-      setDebugInfo(prev => ({
-        ...prev,
-        lastSync: new Date().toISOString(),
-        customerInfoReceived: Object.keys(customerInfo).length
+    if (conversationHistory && conversationHistory.length > 0) {
+      // 转换格式以匹配本地消息格式
+      const convertedMessages = conversationHistory.map((msg, index) => ({
+        id: msg.id || `msg_${index}`,
+        sender: msg.sender || (msg.role === 'user' ? 'user' : 'bot'),
+        text: msg.content || msg.text || '',
+        timestamp: msg.timestamp || new Date().toISOString(),
+        type: msg.type || 'normal',
+        recommendations: msg.recommendations || []
       }));
-      console.log('📊 Customer info updated:', Object.keys(customerInfo).length, 'fields');
-    }
-  }, [customerInfo]);
-
-  // 优化的消息发送
-  const handleSend = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
-
-    const currentInput = input.trim();
-    setInput('');
-    setIsLoading(true);
-
-    // 添加用户消息
-    const userMessage = {
-      sender: 'user',
-      text: currentInput,
-      timestamp: new Date().toISOString()
-    };
-    setMessages(prev => [...prev, userMessage]);
-
-    // 通知父组件
-    if (onNewMessage) {
-      onNewMessage({
-        role: 'user',
-        content: currentInput,
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    try {
-      const startTime = Date.now();
       
-      // 构建完整对话历史
-      const fullChatHistory = [
-        ...conversationHistory,
-        {
-          role: 'user',
-          content: currentInput,
-          timestamp: new Date().toISOString()
-        }
-      ];
-
-      console.log('📤 Sending message with context:', {
-        messageLength: currentInput.length,
-        historyLength: fullChatHistory.length,
-        customerFields: Object.keys(customerInfo || {}).length
-      });
-
-      const apiResponse = await sendEnhancedMessage(
-        currentInput, 
-        sessionId, 
-        fullChatHistory, 
-        customerInfo
-      );
-
-      const responseTime = Date.now() - startTime;
+      setMessages(convertedMessages);
       setDebugInfo(prev => ({
         ...prev,
-        lastApiCall: new Date().toISOString(),
-        responseTime
+        lastSync: Date.now(),
+        customerInfoReceived: Object.keys(customerInfo || {}).length
       }));
-
-      // 验证响应
-      if (!apiResponse || !apiResponse.reply) {
-        throw new Error('Invalid response from server');
-      }
-
-      const { reply, recommendations } = apiResponse;
-
-      // 处理推荐
-      if (recommendations && Array.isArray(recommendations) && recommendations.length > 0) {
-        console.log('📋 Processing recommendations:', recommendations.length);
-        
-        const validRecommendations = recommendations.filter(rec => 
-          rec && 
-          rec.lender_name && 
-          rec.product_name && 
-          rec.base_rate !== undefined
-        );
-
-        if (validRecommendations.length > 0 && onRecommendationUpdate) {
-          console.log('📋 Updating with valid recommendations:', validRecommendations.length);
-          onRecommendationUpdate(validRecommendations);
-        }
-      }
-
-      // 添加机器人回复（移除status相关逻辑）
-      const botMessage = {
-        sender: 'bot',
-        text: reply,
-        timestamp: new Date().toISOString(),
-        responseTime
-      };
-      setMessages(prev => [...prev, botMessage]);
-
-      // 通知父组件
-      if (onNewMessage) {
-        onNewMessage({
-          role: 'assistant',
-          content: reply,
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      // 更新连接状态（成功的API调用表示连接正常）
-      if (!connectionState.isConnected) {
-        setConnectionState(prev => ({
-          ...prev,
-          isConnected: true,
-          retryCount: 0
-        }));
-      }
-
-    } catch (error) {
-      console.error('❌ Send failed:', error);
-
-      // 智能错误处理
-      let errorMessage = "I'm having trouble connecting to our AI service. Please try again in a moment.";
-
-      if (error.message.includes('timeout') || error.message.includes('AbortError')) {
-        errorMessage = "Request timed out. Please try again.";
-      } else if (error.message.includes('HTTP 429')) {
-        errorMessage = "Server is currently busy. Please wait a moment and try again.";
-      } else if (error.message.includes('HTTP 503')) {
-        errorMessage = "AI service is temporarily unavailable. Please try again in a few minutes.";
-      } else if (error.message.includes('HTTP 504')) {
-        errorMessage = "Request timed out. Please try again.";
-      } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-        errorMessage = "Network connection issue. Please check your connection.";
-      }
-
-      // 添加错误消息
-      const errorBotMessage = {
-        sender: 'bot',
-        text: errorMessage,
-        timestamp: new Date().toISOString(),
-        isError: true
-      };
-      setMessages(prev => [...prev, errorBotMessage]);
-
-      // 更新连接状态
-      setConnectionState(prev => ({
-        ...prev,
-        isConnected: false,
-        retryCount: prev.retryCount + 1
-      }));
-
-    } finally {
-      setIsLoading(false);
     }
-  }, [input, isLoading, sessionId, conversationHistory, customerInfo, onNewMessage, onRecommendationUpdate, connectionState.isConnected]);
+  }, [conversationHistory, customerInfo]);
 
-  // 手动重连
-  const handleReconnect = useCallback(() => {
-    console.log('🔄 Manual reconnection triggered');
-    setConnectionState(prev => ({ ...prev, retryCount: 0 }));
-    initializeConnection();
-  }, [initializeConnection]);
-
-  // 处理输入
-  const handleInputChange = useCallback((e) => {
-    setInput(e.target.value);
-    // 自动调整文本框高度
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
-    }
-  }, []);
-
-  const handleKeyDown = useCallback((e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  }, [handleSend]);
-
-  // 自动滚动
+  // 自动滚动到底部
   useEffect(() => {
     if (chatRef.current) {
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
     }
   }, [messages]);
 
-  // 连接状态指示器
-  const connectionIndicator = useMemo(() => {
-    if (connectionState.isChecking) {
-      return { color: 'bg-yellow-500', text: 'Connecting...' };
-    } else if (connectionState.isConnected) {
-      return { color: 'bg-green-500', text: 'Connected' };
-    } else {
-      return { color: 'bg-red-500', text: 'Disconnected' };
+  // 文本区域自动调整高度
+  const adjustTextareaHeight = useCallback(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
     }
-  }, [connectionState]);
+  }, []);
 
-  // 消息渲染组件（移除Basic Mode状态显示）
-  const MessageComponent = useCallback(({ message }) => (
-    <div
-      className={`flex mb-4 ${
-        message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-    >
-      <div
-        className={`px-5 py-3 rounded-2xl max-w-[75%] whitespace-pre-wrap text-base ${
-          message.sender === 'user' 
-            ? 'bg-blue-600 text-white shadow-lg' 
-            : message.isError
-            ? 'bg-red-50 border border-red-200 text-red-700'
-            : 'bg-white border shadow-lg'
-        }`}
-      >
-        {message.text}
+  // 输入处理
+  const handleInputChange = useCallback((e) => {
+    setInput(e.target.value);
+    adjustTextareaHeight();
+  }, [adjustTextareaHeight]);
+
+  // 键盘事件处理
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }, []);
+
+  // 🔧 修复：发送消息处理 - 确保数据正确传递给App组件
+  const handleSend = useCallback(async () => {
+    if (!input.trim() || isLoading || !connectionState.isConnected) {
+      return;
+    }
+
+    const userMessage = {
+      id: `msg_${Date.now()}_user`,
+      sender: 'user',
+      text: input.trim(),
+      timestamp: new Date().toISOString(),
+      type: 'normal'
+    };
+
+    // 添加用户消息到本地状态
+    setMessages(prev => [...prev, userMessage]);
+    
+    // 🔧 重要：通知App组件用户发送了新消息
+    if (onNewMessage) {
+      onNewMessage({
+        content: userMessage.text,
+        sender: 'user',
+        timestamp: userMessage.timestamp,
+        type: 'normal'
+      });
+    }
+
+    setInput('');
+    setIsLoading(true);
+    
+    // 重置文本区域高度
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+
+    try {
+      const startTime = Date.now();
+      
+      // 🔧 确保传递完整的客户信息
+      console.log('📤 Sending message with customer info:', customerInfo);
+      
+      const response = await sendEnhancedMessage(
+        userMessage.text,
+        sessionId,
+        customerInfo || {},  // 确保customerInfo不为空
+        conversationHistory || []  // 确保conversationHistory不为空
+      );
+
+      const responseTime = Date.now() - startTime;
+      
+      console.log('📥 Received response:', response);
+      console.log(`⏱️ Response time: ${responseTime}ms`);
+
+      if (response && response.reply) {
+        const botMessage = {
+          id: `msg_${Date.now()}_bot`,
+          sender: 'bot',
+          text: response.reply,
+          timestamp: new Date().toISOString(),
+          type: 'normal',
+          recommendations: response.recommendations || []
+        };
+
+        // 添加机器人回复到本地状态
+        setMessages(prev => [...prev, botMessage]);
         
-        {/* 仅显示错误状态 */}
-        {message.isError && (
-          <div className="text-xs mt-1 opacity-60">
-            (Error)
+        // 🔧 重要：通知App组件机器人发送了回复
+        if (onNewMessage) {
+          onNewMessage({
+            content: botMessage.text,
+            sender: 'bot',
+            timestamp: botMessage.timestamp,
+            type: 'normal',
+            recommendations: response.recommendations || [],
+            customer_profile: response.customer_profile || {},
+            extracted_info: response.extracted_info || {}
+          });
+        }
+
+        // 🔧 重要：如果有推荐，通知App组件更新推荐
+        if (response.recommendations && response.recommendations.length > 0 && onRecommendationUpdate) {
+          console.log('📋 Updating recommendations:', response.recommendations);
+          onRecommendationUpdate(response.recommendations);
+        }
+
+        // 更新调试信息
+        setDebugInfo(prev => ({
+          ...prev,
+          lastApiCall: Date.now(),
+          responseTime
+        }));
+
+      } else {
+        throw new Error('Invalid response format');
+      }
+
+    } catch (error) {
+      console.error('❌ Send message error:', error);
+      
+      const errorMessage = {
+        id: `msg_${Date.now()}_error`,
+        sender: 'bot',
+        text: "I'm having trouble connecting to our AI service. Please try again in a moment.",
+        timestamp: new Date().toISOString(),
+        type: 'error'
+      };
+
+      setMessages(prev => [...prev, errorMessage]);
+      
+      // 🔧 通知App组件发生错误
+      if (onError) {
+        onError(error);
+      }
+      
+      // 如果连接出错，尝试重新建立连接
+      if (error.message?.includes('network') || error.message?.includes('fetch')) {
+        setConnectionState(prev => ({ ...prev, isConnected: false }));
+        scheduleRetry();
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [input, isLoading, connectionState.isConnected, sessionId, customerInfo, conversationHistory, onNewMessage, onRecommendationUpdate, onError, scheduleRetry]);
+
+  // 消息渲染
+  const renderMessage = useCallback((message) => {
+    const isBot = message.sender === 'bot';
+    const isError = message.type === 'error';
+    
+    return (
+      <div key={message.id} className={`flex ${isBot ? 'justify-start' : 'justify-end'}`}>
+        <div className={`max-w-3xl px-5 py-3 rounded-2xl shadow-lg ${
+          isError 
+            ? 'bg-red-50 border border-red-200 text-red-800'
+            : isBot 
+              ? 'bg-white border text-gray-800' 
+              : 'bg-blue-600 text-white'
+        }`}>
+          <div className="whitespace-pre-wrap leading-relaxed">{message.text}</div>
+          
+          {/* 🔧 推荐信息显示 */}
+          {message.recommendations && message.recommendations.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-gray-200">
+              <div className="text-sm text-gray-600 mb-2">
+                💡 {message.recommendations.length} recommendation{message.recommendations.length > 1 ? 's' : ''} found
+              </div>
+              {message.recommendations.slice(0, 2).map((rec, index) => (
+                <div key={index} className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-2 last:mb-0">
+                  <div className="font-semibold text-blue-900">
+                    {rec.lender_name} - {rec.product_name}
+                  </div>
+                  <div className="text-sm text-blue-700 mt-1">
+                    Rate: {rec.base_rate}% | Max: {rec.max_loan_amount}
+                  </div>
+                </div>
+              ))}
+              {message.recommendations.length > 2 && (
+                <div className="text-sm text-gray-500 italic">
+                  +{message.recommendations.length - 2} more options available
+                </div>
+              )}
+            </div>
+          )}
+          
+          <div className={`text-xs mt-2 ${isBot ? 'text-gray-400' : 'text-blue-200'}`}>
+            {new Date(message.timestamp).toLocaleTimeString()}
           </div>
-        )}
-        
-        {/* 响应时间（开发模式） */}
-        {process.env.NODE_ENV === 'development' && message.responseTime && (
-          <div className="text-xs mt-1 opacity-50">
-            {message.responseTime}ms
-          </div>
-        )}
+        </div>
       </div>
-    </div>
-  ), []);
+    );
+  }, []);
 
-  const renderMessage = useCallback((message, index) => (
-    <MessageComponent key={`${message.timestamp}-${index}`} message={message} />
-  ), [MessageComponent]);
+  // 连接状态指示器
+  const ConnectionIndicator = useMemo(() => {
+    if (connectionState.isChecking) {
+      return (
+        <div className="flex items-center space-x-2 text-yellow-600">
+          <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+          <span className="text-sm">Connecting...</span>
+        </div>
+      );
+    }
+    
+    if (!connectionState.isConnected) {
+      return (
+        <div className="flex items-center space-x-2 text-red-600">
+          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+          <span className="text-sm">Disconnected</span>
+          <button 
+            onClick={initializeConnection}
+            className="text-xs bg-red-100 hover:bg-red-200 px-2 py-1 rounded transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="flex items-center space-x-2 text-green-600">
+        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+        <span className="text-sm">Connected</span>
+      </div>
+    );
+  }, [connectionState, initializeConnection]);
 
   return (
-    <div className="flex flex-col h-full" style={{ backgroundColor: '#fef7e8' }}>
-      {/* Header */}
-      <div className="px-6 py-4 border-b" style={{ backgroundColor: '#fef7e8' }}>
+    <div className="h-full flex flex-col" style={{ backgroundColor: '#fef7e8' }}>
+      {/* 顶部状态栏 */}
+      <div className="flex-shrink-0 px-6 py-3 border-b bg-white shadow-sm">
         <div className="flex justify-between items-center">
-          <h1 className="text-xl font-semibold text-gray-800">Agent X</h1>
-          
-          {/* 连接状态 */}
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${connectionIndicator.color}`}></div>
-            <span className="text-xs text-gray-600">
-              {connectionIndicator.text}
-            </span>
-            {!connectionState.isConnected && !connectionState.isChecking && (
-              <button
-                onClick={handleReconnect}
-                className="text-xs text-blue-600 hover:text-blue-800 ml-2"
-              >
-                Retry
-              </button>
-            )}
+          <div className="flex items-center space-x-3">
+            <h2 className="text-lg font-semibold text-gray-800">Agent X</h2>
+            {ConnectionIndicator}
           </div>
           
-          {/* 调试信息 */}
+          {/* 🔧 调试信息（仅开发模式） */}
           {process.env.NODE_ENV === 'development' && (
-            <div className="text-xs text-gray-500 text-right">
-              <div>Sync: {debugInfo.lastSync ? new Date(debugInfo.lastSync).toLocaleTimeString() : 'None'}</div>
+            <div className="text-xs text-gray-500 space-y-1">
+              <div>Session: {sessionId.slice(-8)}</div>
+              <div>Sync: {debugInfo.lastSync ? 
+                new Date(debugInfo.lastSync).toLocaleTimeString() : 'None'}</div>
               <div>Fields: {debugInfo.customerInfoReceived || 0}</div>
               <div>Response: {debugInfo.responseTime ? `${debugInfo.responseTime}ms` : 'N/A'}</div>
             </div>

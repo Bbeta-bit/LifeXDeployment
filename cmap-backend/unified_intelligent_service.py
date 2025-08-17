@@ -1,4 +1,4 @@
-# unified_intelligent_service.py - 修复信息提取和产品信息完整性
+# unified_intelligent_service.py - 修复版本：基于previous版本恢复功能
 import os
 import json
 import re
@@ -66,7 +66,7 @@ class CustomerProfile:
     ABN_years: Optional[int] = None
     GST_years: Optional[int] = None
     credit_score: Optional[int] = None
-    business_structure: Optional[str] = None  # 🔧 修复1：添加为核心字段
+    business_structure: Optional[str] = None  # sole_trader/company/trust/partnership
     
     # Vehicle-Specific MVP Fields (only asked if asset_type is motor_vehicle)
     vehicle_type: Optional[str] = None  # passenger_car/light_truck/van_ute/etc
@@ -87,11 +87,28 @@ class CustomerProfile:
     documentation_preference: Optional[str] = None
 
 class UnifiedIntelligentService:
+    """统一的智能服务，集成MVP提取、产品匹配、和对话管理"""
+    
     def __init__(self):
+        # 使用安全的API密钥加载
         self.anthropic_api_key = get_api_key()
-        self.conversation_states = {}
+        self.api_url = "https://api.anthropic.com/v1/messages"
         
-        # 🔧 修复：增强的业务结构模式
+        # 加载产品文档
+        self.product_docs = self._load_all_product_docs()
+        
+        # 对话状态存储
+        self.conversation_states = {}
+        self.max_conversation_rounds = 4  # 最多4轮对话后必须给推荐
+        
+        # MVP字段定义 - 统一管理，根据资产类型动态调整
+        self.mvp_fields = ["loan_type", "asset_type", "property_status", "ABN_years", "GST_years", "credit_score", "business_structure"]
+        self.vehicle_specific_fields = ["vehicle_type", "vehicle_condition"]  # 只有motor_vehicle时才问
+        
+        # 偏好字段 - 用户提供的偏好享有相同权重
+        self.preference_fields = ["interest_rate_ceiling", "monthly_budget", "min_loan_amount", "preferred_term"]
+        
+        # 业务结构模式匹配
         self.business_structure_patterns = {
             'sole_trader': [
                 'sole trader', 'sole trading', 'individual trader', 'self employed',
@@ -111,20 +128,149 @@ class UnifiedIntelligentService:
             ]
         }
 
-    def _extract_business_structure_information(self, conversation_text: str) -> Optional[str]:
-        """🔧 修复1：增强的业务结构提取"""
-        text_lower = conversation_text.lower()
+    def _load_all_product_docs(self) -> Dict[str, str]:
+        """加载完整产品文档"""
+        docs = {}
+        lender_files = {
+            "Angle": "Angle.md",
+            "BFS": "BFS.md", 
+            "FCAU": "FCAU.md",
+            "RAF": "RAF.md"
+        }
         
-        for structure, patterns in self.business_structure_patterns.items():
-            for pattern in patterns:
-                if pattern in text_lower:
-                    print(f"🏢 Detected business structure: {structure} (from pattern: {pattern})")
-                    return structure
+        for lender, filename in lender_files.items():
+            try:
+                possible_paths = [
+                    filename,
+                    f"docs/{filename}",
+                    f"documents/{filename}",
+                    f"../docs/{filename}"
+                ]
+                
+                for file_path in possible_paths:
+                    if os.path.exists(file_path):
+                        with open(file_path, 'r', encoding='utf-8') as file:
+                            content = file.read()
+                            docs[lender] = content
+                            print(f"✅ Loaded {lender} products from {file_path} ({len(content)} chars)")
+                        break
+                else:
+                    print(f"⚠️ {lender} product file not found: {filename}")
+                    docs[lender] = f"{lender} products (documentation not available)"
+                    
+            except Exception as e:
+                print(f"❌ Error loading {lender}: {e}")
+                docs[lender] = f"{lender} products (error loading documentation)"
         
-        return None
+        return docs
+
+    async def process_user_message(self, user_message: str, session_id: str = "default", 
+                                 current_customer_info: Dict = None) -> Dict[str, Any]:
+        """🔧 主API方法：处理用户消息 - 兼容main.py调用"""
+        
+        print(f"\n📄 Processing user message - Session: {session_id}")
+        print(f"📝 User message: {user_message}")
+        print(f"📊 Current customer info: {current_customer_info}")
+        
+        # 检测会话重置需求
+        if session_id in self.conversation_states:
+            current_profile = self.conversation_states[session_id]["customer_profile"]
+            if self._detect_session_reset_needed(user_message, current_profile):
+                print("🔄 Resetting session for new case")
+                del self.conversation_states[session_id]
+        
+        # 获取或创建会话状态
+        if session_id not in self.conversation_states:
+            self.conversation_states[session_id] = {
+                "stage": ConversationStage.MVP_COLLECTION,
+                "customer_profile": CustomerProfile(),
+                "conversation_history": [],
+                "asked_fields": set(),
+                "round_count": 0,
+                "last_recommendations": []
+            }
+        
+        state = self.conversation_states[session_id]
+        state["round_count"] += 1
+        
+        # 同步来自前端的客户信息
+        if current_customer_info:
+            self._sync_customer_info_from_form(state["customer_profile"], current_customer_info)
+            print(f"📄 Synced customer info from frontend")
+        
+        # 添加当前消息到历史
+        state["conversation_history"].append({"role": "user", "content": user_message})
+        
+        # 使用完整的对话历史提取信息
+        extracted_info = await self._extract_mvp_and_preferences(state["conversation_history"])
+        print(f"🔍 Extracted info: {extracted_info}")
+        
+        # 更新客户档案
+        self._update_customer_profile_with_priority(state["customer_profile"], extracted_info, current_customer_info)
+        print(f"📊 Updated profile: {self._serialize_customer_profile(state['customer_profile'])}")
+        
+        # 检查已经有值的字段，自动标记为已问过
+        required_mvp_fields = self._get_required_mvp_fields(state["customer_profile"])
+        for field in required_mvp_fields:
+            if getattr(state["customer_profile"], field) is not None:
+                state["asked_fields"].add(field)
+        
+        # 检查是否是调整请求
+        user_message_lower = user_message.lower()
+        is_adjustment_request = any(phrase in user_message_lower for phrase in [
+            "adjust", "change", "modify", "different", "lower rate", "higher amount", 
+            "longer term", "shorter term", "better option", "other option"
+        ])
+        
+        # 检查用户是否要求最低利率或推荐
+        wants_lowest_rate = any(phrase in user_message_lower for phrase in [
+            "lowest interest rate", "lowest rate", "best rate", "cheapest rate",
+            "show me options", "see recommendations", "recommend products", "show options"
+        ])
+        
+        # 确定对话阶段
+        new_stage = self._determine_conversation_stage(state, wants_lowest_rate or is_adjustment_request)
+        print(f"🎯 Current stage: {new_stage}")
+        print(f"🔍 Asked fields: {state['asked_fields']}")
+        state["stage"] = new_stage
+        
+        # 生成响应
+        try:
+            if new_stage == ConversationStage.MVP_COLLECTION:
+                response = await self._handle_mvp_collection(state)
+            elif new_stage == ConversationStage.PREFERENCE_COLLECTION:
+                response = await self._handle_preference_collection(state, wants_lowest_rate)
+            elif new_stage == ConversationStage.PRODUCT_MATCHING:
+                response = await self._handle_product_matching(state, is_adjustment_request)
+            elif new_stage == ConversationStage.RECOMMENDATION:
+                response = await self._handle_recommendation(state, is_adjustment_request)
+            else:
+                response = await self._handle_general_conversation(state)
+        except Exception as e:
+            print(f"❌ Error in stage handling: {e}")
+            response = {
+                "message": "I'm having some trouble processing your request. Let me ask you a simple question to get back on track: What type of loan are you looking for?",
+                "recommendations": []
+            }
+        
+        # 添加助手回复到历史
+        state["conversation_history"].append({"role": "assistant", "content": response["message"]})
+        
+        # 🔧 返回main.py期望的格式
+        return {
+            "message": response["message"],  # main.py expects "message" not "reply"
+            "session_id": session_id,
+            "stage": new_stage.value,
+            "customer_profile": self._serialize_customer_profile(state["customer_profile"]),
+            "recommendations": response.get("recommendations", []),
+            "next_questions": response.get("next_questions", []),
+            "round_count": state["round_count"],
+            "status": "success",
+            "extracted_info": extracted_info  # 为function bar提供提取信息
+        }
 
     def _detect_session_reset_needed(self, user_message: str, current_profile: CustomerProfile) -> bool:
-        """🔧 修复2：检测是否需要重置会话"""
+        """检测是否需要重置会话"""
         reset_patterns = [
             'new loan', 'different loan', 'start over', 'fresh start', 
             'another loan', 'different case', 'new application', 'completely different'
@@ -138,484 +284,9 @@ class UnifiedIntelligentService:
         
         return should_reset
 
-    async def _extract_mvp_and_preferences_enhanced(self, conversation_history: List[Dict]) -> Dict[str, Any]:
-        """🔧 修复：增强的MVP和偏好提取，包含业务结构"""
-        
-        if not conversation_history:
-            return {}
-        
-        # 合并所有对话内容
-        full_conversation_text = " ".join([
-            msg.get("content", "") for msg in conversation_history 
-            if isinstance(msg.get("content"), str)
-        ])
-        
-        extracted_info = {}
-        
-        # 🔧 修复：业务结构提取
-        business_structure = self._extract_business_structure_information(full_conversation_text)
-        if business_structure:
-            extracted_info["business_structure"] = business_structure
-        
-        # 现有的提取逻辑保持不变...
-        text_lower = full_conversation_text.lower()
-        
-        # Loan type extraction
-        if any(word in text_lower for word in ["business loan", "commercial loan", "asset finance"]):
-            extracted_info["loan_type"] = "business"
-        elif any(word in text_lower for word in ["personal loan", "consumer loan"]):
-            extracted_info["loan_type"] = "consumer"
-        
-        # Asset type extraction with enhanced patterns
-        asset_patterns = {
-            "motor_vehicle": ["car", "vehicle", "truck", "van", "ute", "motorcycle", "auto", "toyota", "ford", "holden"],
-            "primary": ["primary equipment", "main equipment", "core machinery"],
-            "secondary": ["secondary equipment", "generator", "compressor"],
-            "tertiary": ["tertiary equipment", "computer", "IT equipment"]
-        }
-        
-        for asset_type, patterns in asset_patterns.items():
-            if any(pattern in text_lower for pattern in patterns):
-                extracted_info["asset_type"] = asset_type
-                break
-        
-        # Property status extraction
-        if any(phrase in text_lower for phrase in ["own property", "property owner", "have property", "own a house", "own home"]):
-            extracted_info["property_status"] = "property_owner"
-        elif any(phrase in text_lower for phrase in ["don't own property", "no property", "rent", "renting"]):
-            extracted_info["property_status"] = "non_property_owner"
-        
-        # Vehicle condition extraction
-        if any(word in text_lower for word in ["new car", "brand new", "new vehicle"]):
-            extracted_info["vehicle_condition"] = "new"
-        elif any(word in text_lower for word in ["used car", "second hand", "pre-owned"]):
-            extracted_info["vehicle_condition"] = "used"
-        elif any(word in text_lower for word in ["demo", "demonstrator"]):
-            extracted_info["vehicle_condition"] = "demonstrator"
-        
-        # Numeric extractions with enhanced patterns
-        
-        # ABN years
-        abn_match = re.search(r"abn.{0,20}(\d+).{0,10}year", text_lower)
-        if abn_match:
-            extracted_info["ABN_years"] = int(abn_match.group(1))
-        
-        # GST years
-        gst_match = re.search(r"gst.{0,20}(\d+).{0,10}year", text_lower)
-        if gst_match:
-            extracted_info["GST_years"] = int(gst_match.group(1))
-        
-        # Credit score
-        credit_match = re.search(r"credit.{0,20}(\d{3,4})", text_lower)
-        if credit_match:
-            score = int(credit_match.group(1))
-            if 300 <= score <= 900:
-                extracted_info["credit_score"] = score
-        
-        # Loan amount - 🔧 修复3：增强贷款金额提取
-        amount_patterns = [
-            r"[\$](\d{1,3}(?:,\d{3})*(?:\.\d{2})?)",
-            r"(\d{1,3}(?:,\d{3})*)\s*(?:dollars?|k|thousand)",
-            r"borrow\s*(\d{1,3}(?:,\d{3})*)",
-            r"loan\s*(?:of|for)?\s*[\$]?(\d{1,3}(?:,\d{3})*)"
-        ]
-        
-        for pattern in amount_patterns:
-            matches = re.findall(pattern, text_lower.replace(",", ""))
-            if matches:
-                amounts = []
-                for match in matches:
-                    try:
-                        amount = float(match.replace(",", ""))
-                        if amount > 1000:  # 过滤掉小额数字
-                            amounts.append(amount)
-                    except ValueError:
-                        continue
-                
-                if amounts:
-                    extracted_info["desired_loan_amount"] = max(amounts)  # 使用最大的金额
-                    break
-        
-        print(f"🔍 Enhanced extraction result: {extracted_info}")
-        return extracted_info
-
-    def _get_required_mvp_fields(self, profile: CustomerProfile) -> List[str]:
-        """🔧 修复：获取必需的MVP字段，包含业务结构"""
-        base_fields = ["loan_type", "asset_type", "business_structure", "property_status", "ABN_years", "GST_years"]
-        
-        # 如果是motor_vehicle，添加车辆相关字段
-        if profile.asset_type == "motor_vehicle":
-            base_fields.extend(["vehicle_type", "vehicle_condition"])
-        
-        return base_fields
-
-    async def _handle_mvp_collection(self, state: Dict) -> Dict[str, Any]:
-        """🔧 修复：处理MVP收集阶段，优先业务结构"""
-        profile = state["customer_profile"]
-        asked_fields = state["asked_fields"]
-        
-        # 🔧 修复：优先级顺序，业务结构提前
-        mvp_fields_priority = [
-            "loan_type",
-            "asset_type", 
-            "business_structure",  # 提高优先级
-            "property_status",
-            "ABN_years",
-            "GST_years",
-            "credit_score",
-            "desired_loan_amount"
-        ]
-        
-        # 检查vehicle相关字段
-        if profile.asset_type == "motor_vehicle":
-            vehicle_fields = ["vehicle_type", "vehicle_condition"]
-            for field in vehicle_fields:
-                if field not in asked_fields and getattr(profile, field) is None:
-                    asked_fields.add(field)
-                    question = self._get_field_question(field)
-                    return {
-                        "message": question,
-                        "next_questions": [question]
-                    }
-        
-        # 检查主要MVP字段
-        for field in mvp_fields_priority:
-            if field not in asked_fields and getattr(profile, field) is None:
-                asked_fields.add(field)
-                question = self._get_field_question(field)
-                return {
-                    "message": question,
-                    "next_questions": [question]
-                }
-        
-        # 所有MVP字段已收集，进入偏好收集阶段
-        return await self._handle_preference_collection(state)
-
-    def _get_field_question(self, field: str) -> str:
-        """获取字段对应的问题"""
-        questions = {
-            "loan_type": "What type of loan are you looking for? (business/consumer)",
-            "asset_type": "What type of asset are you looking to finance? (vehicle/equipment/machinery)",
-            "business_structure": "What is your business structure? (sole trader/company/partnership/trust)",  # 🔧 修复
-            "property_status": "Do you own property?",
-            "ABN_years": "How many years has your ABN been registered?",
-            "GST_years": "How many years have you been registered for GST?",
-            "credit_score": "What is your current credit score?",
-            "desired_loan_amount": "How much would you like to borrow?",
-            "vehicle_type": "What type of vehicle? (passenger car/truck/van/motorcycle)",
-            "vehicle_condition": "Are you looking at new or used vehicles?",
-            "vehicle_make": "What make of vehicle?",
-            "vehicle_model": "What model of vehicle?"
-        }
-        return questions.get(field, f"Please provide your {field}")
-
-    async def _handle_loan_amount_update(self, state: Dict, new_amount: float) -> Dict[str, Any]:
-        """🔧 修复3：处理贷款金额更新并触发重新匹配"""
-        profile = state["customer_profile"]
-        old_amount = profile.desired_loan_amount
-        
-        # 更新贷款金额
-        profile.desired_loan_amount = new_amount
-        print(f"💰 Loan amount updated: ${old_amount:,} → ${new_amount:,}")
-        
-        # 清除之前的推荐，强制重新匹配
-        state["last_recommendations"] = []
-        
-        # 触发新的产品匹配
-        new_recommendations = await self._ai_product_matching_with_lowest_rate_priority(profile)
-        
-        # 标记为调整
-        for rec in new_recommendations:
-            rec["is_adjustment"] = True
-            rec["adjustment_reason"] = f"Loan amount changed to ${new_amount:,}"
-        
-        # 更新状态
-        state["last_recommendations"] = new_recommendations
-        
-        return {
-            "message": f"Perfect! I've updated your loan amount to ${new_amount:,} and found new recommendations that can handle this amount.",
-            "recommendations": new_recommendations,
-            "adjustment_made": True
-        }
-
-    async def _ai_product_matching_with_lowest_rate_priority(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
-        """🔧 修复4：增强的产品匹配，优先最低利率"""
-        
-        print(f"🎯 Enhanced product matching for loan amount: ${profile.desired_loan_amount:,}")
-        print(f"📊 Business structure: {profile.business_structure}")
-        
-        try:
-            # 检查API密钥
-            if not self.anthropic_api_key:
-                print("⚠️ No Anthropic API key - using enhanced fallback recommendation")
-                return [self._create_comprehensive_fallback_recommendation_enhanced(profile)]
-            
-            # 获取所有符合条件的产品
-            eligible_products = self._get_all_eligible_products_enhanced(profile)
-            
-            # 🔧 修复：按贷款金额容量过滤
-            if profile.desired_loan_amount:
-                eligible_products = [
-                    p for p in eligible_products 
-                    if p.get('max_loan_amount', 0) >= profile.desired_loan_amount
-                ]
-                print(f"📊 Products after loan amount filter: {len(eligible_products)}")
-            
-            # 🔧 修复：按利率排序（最低优先）
-            eligible_products.sort(key=lambda x: x.get('base_rate', 999))
-            
-            # 构建推荐
-            recommendations = []
-            for i, product in enumerate(eligible_products[:3]):  # 取前3个最低利率
-                
-                # 计算月供
-                monthly_payment = self._calculate_monthly_payment(
-                    profile.desired_loan_amount or 100000,
-                    product.get('base_rate', 0),
-                    60  # 默认期限
-                )
-                
-                recommendation = {
-                    "lender_name": product.get('lender_name', 'Unknown'),
-                    "product_name": product.get('product_name', 'Unknown Product'),
-                    "base_rate": product.get('base_rate', 0),
-                    "comparison_rate": product.get('comparison_rate', product.get('base_rate', 0)),
-                    "max_loan_amount": product.get('max_loan_amount', 0),
-                    "monthly_payment": monthly_payment,
-                    "loan_terms": product.get('loan_terms', '12-84 months'),
-                    "eligibility_status": self._check_eligibility_status(product, profile),
-                    "reasons": self._generate_match_reasons(product, profile),
-                    "rank": i + 1,
-                    "rate_tier": "premium" if product.get('base_rate', 0) < 8 else "competitive"
-                }
-                
-                recommendations.append(recommendation)
-            
-            print(f"✅ Generated {len(recommendations)} recommendations")
-            return recommendations
-            
-        except Exception as e:
-            print(f"❌ Error in product matching: {e}")
-            return [self._create_comprehensive_fallback_recommendation_enhanced(profile)]
-
-    def _get_all_eligible_products_enhanced(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
-        """🔧 修复：获取所有符合条件的产品，包含业务结构检查"""
-        
-        # 模拟产品数据库 - 这里应该连接到您的实际产品数据库
-        all_products = [
-            {
-                "lender_name": "RAF",
-                "product_name": "Vehicle Finance Premium",
-                "base_rate": 6.89,
-                "comparison_rate": 7.15,
-                "max_loan_amount": 400000,
-                "min_abn_years": 2,
-                "min_gst_years": 1,
-                "min_credit_score": 600,
-                "accepted_business_structures": ["company", "trust", "partnership"],  # 不接受sole trader
-                "property_required": False
-            },
-            {
-                "lender_name": "BFS",
-                "product_name": "Prime Commercial",
-                "base_rate": 7.65,
-                "comparison_rate": 7.95,
-                "max_loan_amount": 600000,  # 🔧 修复：更高的贷款限额
-                "min_abn_years": 1,
-                "min_gst_years": 1,
-                "min_credit_score": 500,
-                "accepted_business_structures": ["sole_trader", "company", "trust", "partnership"],
-                "property_required": False
-            },
-            {
-                "lender_name": "Angle",
-                "product_name": "Primary Asset Finance",
-                "base_rate": 7.99,
-                "comparison_rate": 8.25,
-                "max_loan_amount": 500000,
-                "min_abn_years": 2,
-                "min_gst_years": 1,
-                "min_credit_score": 500,
-                "accepted_business_structures": ["sole_trader", "company", "trust", "partnership"],
-                "property_required": True
-            }
-        ]
-        
-        # 过滤符合条件的产品
-        eligible_products = []
-        
-        for product in all_products:
-            eligible = True
-            reasons = []
-            
-            # 检查ABN年限
-            if profile.ABN_years and profile.ABN_years < product.get('min_abn_years', 0):
-                eligible = False
-                reasons.append(f"ABN years {profile.ABN_years} < required {product.get('min_abn_years')}")
-            
-            # 检查GST年限
-            if profile.GST_years and profile.GST_years < product.get('min_gst_years', 0):
-                eligible = False
-                reasons.append(f"GST years {profile.GST_years} < required {product.get('min_gst_years')}")
-            
-            # 检查信用分数
-            if profile.credit_score and profile.credit_score < product.get('min_credit_score', 0):
-                eligible = False
-                reasons.append(f"Credit score {profile.credit_score} < required {product.get('min_credit_score')}")
-            
-            # 🔧 修复：检查业务结构
-            if profile.business_structure and product.get('accepted_business_structures'):
-                if profile.business_structure not in product.get('accepted_business_structures', []):
-                    eligible = False
-                    reasons.append(f"Business structure '{profile.business_structure}' not accepted")
-            
-            # 检查房产要求
-            if product.get('property_required', False) and profile.property_status == "non_property_owner":
-                eligible = False
-                reasons.append("Property ownership required")
-            
-            if eligible:
-                eligible_products.append(product)
-            else:
-                print(f"❌ Product {product['product_name']} not eligible: {reasons}")
-        
-        print(f"✅ Found {len(eligible_products)} eligible products")
-        return eligible_products
-
-    def _check_eligibility_status(self, product: Dict, profile: CustomerProfile) -> str:
-        """检查产品的合规状态"""
-        
-        # 检查所有要求是否满足
-        requirements_met = True
-        
-        if profile.ABN_years and profile.ABN_years < product.get('min_abn_years', 0):
-            requirements_met = False
-        
-        if profile.GST_years and profile.GST_years < product.get('min_gst_years', 0):
-            requirements_met = False
-        
-        if profile.credit_score and profile.credit_score < product.get('min_credit_score', 0):
-            requirements_met = False
-        
-        if profile.business_structure and product.get('accepted_business_structures'):
-            if profile.business_structure not in product.get('accepted_business_structures', []):
-                requirements_met = False
-        
-        return "Likely Eligible" if requirements_met else "Requires Review"
-
-    def _generate_match_reasons(self, product: Dict, profile: CustomerProfile) -> List[str]:
-        """生成匹配原因"""
-        reasons = []
-        
-        # 利率相关
-        rate = product.get('base_rate', 0)
-        if rate < 8:
-            reasons.append("Excellent interest rate")
-        elif rate < 10:
-            reasons.append("Competitive interest rate")
-        
-        # 贷款金额
-        if profile.desired_loan_amount and profile.desired_loan_amount <= product.get('max_loan_amount', 0):
-            reasons.append("Loan amount within limits")
-        
-        # 业务结构匹配
-        if profile.business_structure and product.get('accepted_business_structures'):
-            if profile.business_structure in product.get('accepted_business_structures', []):
-                reasons.append("Business structure accepted")
-        
-        return reasons[:3]  # 最多返回3个原因
-
-    def _create_comprehensive_fallback_recommendation_enhanced(self, profile: CustomerProfile) -> Dict[str, Any]:
-        """🔧 修复：增强的备用推荐"""
-        
-        # 根据客户档案选择最合适的备用产品
-        if profile.business_structure == "sole_trader":
-            lender = "BFS"
-            product = "Prime Commercial"
-            rate = 7.65
-            max_amount = 600000
-        elif profile.property_status == "property_owner":
-            lender = "Angle"
-            product = "Primary Asset Finance"
-            rate = 7.99
-            max_amount = 500000
-        else:
-            lender = "RAF"
-            product = "Vehicle Finance Premium"
-            rate = 6.89
-            max_amount = 400000
-        
-        monthly_payment = self._calculate_monthly_payment(
-            profile.desired_loan_amount or 100000,
-            rate,
-            60
-        )
-        
-        return {
-            "lender_name": lender,
-            "product_name": product,
-            "base_rate": rate,
-            "comparison_rate": rate + 0.3,
-            "max_loan_amount": max_amount,
-            "monthly_payment": monthly_payment,
-            "loan_terms": "12-84 months",
-            "eligibility_status": "Likely Eligible",
-            "reasons": ["Fallback recommendation", "Good match for your profile"],
-            "is_fallback": True
-        }
-
-    def _calculate_monthly_payment(self, loan_amount: float, annual_rate: float, term_months: int) -> float:
-        """计算月供"""
-        if not loan_amount or not annual_rate or not term_months:
-            return 0
-        
-        monthly_rate = annual_rate / 100 / 12
-        if monthly_rate == 0:
-            return loan_amount / term_months
-        
-        monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** term_months) / ((1 + monthly_rate) ** term_months - 1)
-        return round(monthly_payment, 2)
-
-    def _update_customer_profile_with_priority(self, profile: CustomerProfile, extracted_info: Dict[str, Any], manual_info: Dict = None):
-        """使用优先级策略更新客户档案"""
-        
-        # 1. 先应用手动修改（较低优先级）
-        if manual_info:
-            for field, value in manual_info.items():
-                if value is not None and value != '' and hasattr(profile, field):
-                    current_value = getattr(profile, field)
-                    if current_value != value:  # 只有值不同时才更新
-                        setattr(profile, field, value)
-                        print(f"📝 Manual update: {field} = {value}")
-        
-        # 2. 再应用自动提取（较高优先级）
-        for field, value in extracted_info.items():
-            if value is not None and value != '' and hasattr(profile, field):
-                current_value = getattr(profile, field)
-                # 自动提取总是覆盖现有值（除非是明显错误的值）
-                if self._validate_extracted_value(field, value):
-                    setattr(profile, field, value)
-                    print(f"🤖 Auto-extracted: {field} = {value}")
-
-    def _validate_extracted_value(self, field: str, value: Any) -> bool:
-        """验证提取的值是否合理"""
-        
-        if field == "credit_score":
-            return isinstance(value, int) and 300 <= value <= 900
-        elif field == "ABN_years":
-            return isinstance(value, int) and 0 <= value <= 50
-        elif field == "GST_years":
-            return isinstance(value, int) and 0 <= value <= 50
-        elif field == "desired_loan_amount":
-            return isinstance(value, (int, float)) and value > 0
-        elif field == "business_structure":
-            return value in ["sole_trader", "company", "partnership", "trust"]
-        
-        return True  # 默认接受其他字段
-
     def _sync_customer_info_from_form(self, profile: CustomerProfile, form_info: Dict):
-        """🔧 修复：从表单同步客户信息到profile"""
-        print(f"🔄 Syncing form info: {form_info}")
+        """从表单同步客户信息到profile"""
+        print(f"📄 Syncing form info: {form_info}")
         
         for field, value in form_info.items():
             if hasattr(profile, field):
@@ -635,33 +306,541 @@ class UnifiedIntelligentService:
                     
                     if value is not None:
                         setattr(profile, field, value)
-                        print(f"🔄 Synced from form: {field} = {value}")
+                        print(f"📄 Synced from form: {field} = {value}")
 
-    def _determine_conversation_stage(self, state: Dict, force_matching: bool = False) -> ConversationStage:
-        """确定对话阶段"""
+    def _update_customer_profile_with_priority(self, profile: CustomerProfile, extracted_info: Dict[str, Any], manual_info: Dict = None):
+        """使用优先级策略更新客户档案：自动提取 > 手动修改，最新信息 > 历史信息"""
+        
+        # 1. 先应用手动修改（较低优先级）
+        if manual_info:
+            for field, value in manual_info.items():
+                if value is not None and value != '' and hasattr(profile, field):
+                    current_value = getattr(profile, field)
+                    if current_value != value:  # 只有值不同时才更新
+                        setattr(profile, field, value)
+                        print(f"🔍 Manual update: {field} = {value}")
+        
+        # 2. 再应用自动提取（更高优先级，会覆盖手动修改）
+        for field, value in extracted_info.items():
+            if value is not None and hasattr(profile, field):
+                current_value = getattr(profile, field)
+                # 自动提取的信息总是应用（最新信息优先）
+                setattr(profile, field, value)
+                if current_value != value:
+                    print(f"🤖 Auto-extracted (priority): {field} = {value} (was: {current_value})")
+
+    async def _extract_mvp_and_preferences(self, conversation_history: List[Dict]) -> Dict[str, Any]:
+        """使用Claude提取MVP信息和偏好，带fallback机制"""
+        try:
+            # 检查API密钥
+            if not self.anthropic_api_key:
+                print("⚠️ No Anthropic API key - using rule-based extraction")
+                return self._enhanced_rule_based_extraction(conversation_history)
+            
+            conversation_text = "\n".join([
+                f"{msg['role']}: {msg['content']}" for msg in conversation_history[-6:]  # 最近6轮对话
+            ])
+            
+            # 修复后的Prompt - 重点提高语义理解和否定语句处理
+            system_prompt = """你是专业的客户信息提取助手。从对话中灵活提取客户贷款信息，重点理解语义而非严格匹配格式。
+
+核心提取规则：
+1. **否定语句处理**：
+   - "no ABN" / "don't have ABN" / "no abn and gst years" → ABN_years: 0
+   - "no GST" / "not registered for GST" → GST_years: 0
+   - "no property" / "don't own property" → property_status: "non_property_owner"
+
+2. **灵活数值识别**：
+   - "credit score 600" / "600 credit" / "score is 600" → credit_score: 600
+   - "$20000" / "20000" / "20k" / "twenty thousand" → desired_loan_amount: 20000
+   - "2 years ABN" / "ABN for 2 years" → ABN_years: 2
+
+3. **业务术语理解**：
+   - "sole trader" / "self employed" → business_structure: "sole_trader"
+   - "company" / "pty ltd" → business_structure: "company"
+   - "commercial loan" / "business use" → loan_type: "commercial"
+   - "personal loan" / "personal use" → loan_type: "consumer"
+
+4. **调整要求识别**：
+   - "lower rate" / "better rate" → interest_rate_ceiling: (current_rate - 1)
+   - "higher amount" / "more money" → 提取新的loan amount
+   - "longer term" / "shorter term" → 提取新的loan term
+
+5. **语义理解**：
+   - 理解上下文关系，不仅匹配关键词
+   - 处理用户的完整回答，提取所有相关信息
+   - 识别隐含信息和业务逻辑
+
+返回纯JSON格式，不包含任何额外文字：
+{
+    "loan_type": "consumer" or "commercial" or null,
+    "asset_type": "primary" or "secondary" or "tertiary" or "motor_vehicle" or null,
+    "property_status": "property_owner" or "non_property_owner" or null,
+    "ABN_years": number or null,
+    "GST_years": number or null,
+    "credit_score": number or null,
+    "desired_loan_amount": number or null,
+    "loan_term_preference": number or null,
+    "vehicle_type": "passenger_car" or "light_truck" or "van_ute" or "motorcycle" or "heavy_truck" or null,
+    "vehicle_condition": "new" or "demonstrator" or "used" or null,
+    "business_structure": "sole_trader" or "company" or "trust" or "partnership" or null,
+    "interest_rate_ceiling": number or null,
+    "monthly_budget": number or null,
+    "vehicle_make": string or null,
+    "vehicle_model": string or null,
+    "vehicle_year": number or null,
+    "purchase_price": number or null
+}
+
+重要：只返回JSON，不包含任何解释文字。"""
+
+            headers = {
+                "x-api-key": self.anthropic_api_key,
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01"
+            }
+
+            payload = {
+                "model": "claude-3-5-sonnet-20241022",
+                "max_tokens": 800,
+                "temperature": 0.1,
+                "system": system_prompt,
+                "messages": [
+                    {"role": "user", "content": f"从以下对话中提取客户信息:\n{conversation_text}"}
+                ]
+            }
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(self.api_url, headers=headers, json=payload)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    ai_response = result['content'][0]['text']
+                    
+                    # 强化JSON清理
+                    clean_response = self._robust_json_cleaning(ai_response)
+                    
+                    if clean_response:
+                        extracted_data = json.loads(clean_response)
+                        print(f"✅ Claude extraction successful: {extracted_data}")
+                        return extracted_data
+                    else:
+                        print("❌ Could not extract valid JSON from Claude response")
+                        return self._enhanced_rule_based_extraction(conversation_history)
+                    
+                else:
+                    print(f"❌ Anthropic API error: {response.status_code} - {response.text}")
+                    return self._enhanced_rule_based_extraction(conversation_history)
+                    
+        except httpx.TimeoutException:
+            print("⏰ Anthropic API timeout - falling back to rule-based extraction")
+            return self._enhanced_rule_based_extraction(conversation_history)
+            
+        except Exception as e:
+            print(f"❌ Claude extraction failed: {e}")
+            return self._enhanced_rule_based_extraction(conversation_history)
+
+    def _robust_json_cleaning(self, ai_response: str) -> str:
+        """强化的JSON清理方法"""
+        try:
+            # 移除常见的标记
+            clean_response = ai_response.strip()
+            
+            # 移除markdown代码块标记
+            if clean_response.startswith('```json'):
+                clean_response = clean_response[7:]
+            elif clean_response.startswith('```'):
+                clean_response = clean_response[3:]
+            
+            if clean_response.endswith('```'):
+                clean_response = clean_response[:-3]
+            
+            # 查找第一个{和最后一个}
+            start_idx = clean_response.find('{')
+            end_idx = clean_response.rfind('}')
+            
+            if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
+                clean_response = clean_response[start_idx:end_idx+1]
+                
+                # 验证JSON格式
+                json.loads(clean_response)
+                return clean_response
+            else:
+                return None
+                
+        except json.JSONDecodeError:
+            print(f"🔧 JSON cleaning failed, trying alternative approach")
+            
+            # 尝试正则表达式提取JSON
+            json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+            matches = re.findall(json_pattern, ai_response, re.DOTALL)
+            
+            for match in matches:
+                try:
+                    json.loads(match)
+                    return match
+                except json.JSONDecodeError:
+                    continue
+            
+            return None
+        except Exception as e:
+            print(f"🔧 JSON cleaning error: {e}")
+            return None
+
+    def _enhanced_rule_based_extraction(self, conversation_history: List[Dict]) -> Dict[str, Any]:
+        """修复和增强的规则后备提取方法"""
+        conversation_text = " ".join([msg.get("content", "") for msg in conversation_history]).lower()
+        
+        extracted = {}
+        
+        # 1. 增强否定语句处理
+        negative_abn_patterns = [
+            r"no\s+abn", r"don't\s+have\s+abn", r"without\s+abn", 
+            r"no\s+abn\s+and\s+gst", r"no\s+abn.*gst"
+        ]
+        negative_gst_patterns = [
+            r"no\s+gst", r"don't\s+have\s+gst", r"not\s+registered\s+for\s+gst",
+            r"no\s+abn\s+and\s+gst", r"no.*gst.*years"
+        ]
+        
+        for pattern in negative_abn_patterns:
+            if re.search(pattern, conversation_text):
+                extracted["ABN_years"] = 0
+                break
+                
+        for pattern in negative_gst_patterns:
+            if re.search(pattern, conversation_text):
+                extracted["GST_years"] = 0
+                break
+        
+        # 2. 增强业务结构识别
+        for structure, patterns in self.business_structure_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, conversation_text):
+                    extracted["business_structure"] = structure
+                    break
+            if "business_structure" in extracted:
+                break
+        
+        # 3. 增强贷款类型识别
+        if any(word in conversation_text for word in ["business", "company", "commercial"]):
+            extracted["loan_type"] = "commercial"
+        elif any(word in conversation_text for word in ["personal", "consumer", "private"]):
+            extracted["loan_type"] = "consumer"
+        
+        # 4. 增强资产类型识别
+        if any(word in conversation_text for word in ["car", "vehicle", "truck", "van", "motorcycle"]):
+            extracted["asset_type"] = "motor_vehicle"
+        elif any(word in conversation_text for word in ["equipment", "machinery", "primary"]):
+            extracted["asset_type"] = "primary"
+        
+        # 5. 增强房产状态识别
+        property_owner_patterns = [
+            r"own\s+property", r"property\s+owner", r"have\s+property", 
+            r"property\s+backed", r"own\s+a\s+house"
+        ]
+        property_non_owner_patterns = [
+            r"no\s+property", r"don't\s+own", r"rent", r"renting",
+            r"non.property", r"without\s+property"
+        ]
+        
+        for pattern in property_owner_patterns:
+            if re.search(pattern, conversation_text):
+                extracted["property_status"] = "property_owner"
+                break
+        
+        if "property_status" not in extracted:
+            for pattern in property_non_owner_patterns:
+                if re.search(pattern, conversation_text):
+                    extracted["property_status"] = "non_property_owner"
+                    break
+        
+        # 6. 修复并增强数值提取
+        
+        # ABN年数 - 增强模式
+        abn_patterns = [
+            r"(\d+)\s*years?\s*abn", r"abn.*?(\d+)\s*years?", 
+            r"(\d+)\s*years?.*?abn", r"abn\s*for\s*(\d+)\s*years?"
+        ]
+        for pattern in abn_patterns:
+            match = re.search(pattern, conversation_text)
+            if match and "ABN_years" not in extracted:  # 不覆盖否定语句的结果
+                years = int(match.group(1))
+                if 0 <= years <= 50:
+                    extracted["ABN_years"] = years
+                break
+        
+        # GST年数 - 增强模式
+        gst_patterns = [
+            r"(\d+)\s*years?\s*gst", r"gst.*?(\d+)\s*years?",
+            r"(\d+)\s*years?.*?gst", r"gst\s*for\s*(\d+)\s*years?"
+        ]
+        for pattern in gst_patterns:
+            match = re.search(pattern, conversation_text)
+            if match and "GST_years" not in extracted:  # 不覆盖否定语句的结果
+                years = int(match.group(1))
+                if 0 <= years <= 50:
+                    extracted["GST_years"] = years
+                break
+        
+        # 7. **修复信用分数提取** - 扩展模式
+        credit_patterns = [
+            r"credit\s*score\s*(?:is\s*)?(\d{3,4})",
+            r"score\s*(?:is\s*)?(\d{3,4})",
+            r"(\d{3,4})\s*credit",
+            r"my\s*score\s*(?:is\s*)?(\d{3,4})",
+            r"(\d{3,4})\s*score",
+            # 新增模式 - 处理 "credit score 958" 这种格式
+            r"credit\s*score\s*(\d{3,4})",
+            r"score\s*(\d{3,4})",
+            # 处理逗号分隔的情况
+            r"(?:^|,|\s)(?:credit\s*score\s*)?(\d{3,4})(?=\s*,|\s|$)"
+        ]
+        for pattern in credit_patterns:
+            match = re.search(pattern, conversation_text)
+            if match:
+                score = int(match.group(1))
+                if 300 <= score <= 900:
+                    extracted["credit_score"] = score
+                    print(f"✅ Credit score extracted: {score}")
+                    break
+        
+        # 车辆条件
+        if "new" in conversation_text and "vehicle" in conversation_text:
+            extracted["vehicle_condition"] = "new"
+        elif "used" in conversation_text and "vehicle" in conversation_text:
+            extracted["vehicle_condition"] = "used"
+        
+        # 车辆类型
+        if any(word in conversation_text for word in ["model y", "tesla", "passenger car"]):
+            extracted["vehicle_type"] = "passenger_car"
+        elif any(word in conversation_text for word in ["truck", "heavy vehicle"]):
+            extracted["vehicle_type"] = "light_truck"
+        elif any(word in conversation_text for word in ["van", "ute"]):
+            extracted["vehicle_type"] = "van_ute"
+        
+        # 8. **修复贷款金额提取** - 扩展和优化模式
+        amount_patterns = [
+            # 原有模式
+            r"loan\s*amount.*?(\d+(?:,\d{3})*(?:\.\d{2})?)",
+            r"borrow.*?(\d+(?:,\d{3})*)",
+            r"need.*?(\d+(?:,\d{3})*)",
+            r"want.*?(\d+(?:,\d{3})*)",
+            r"looking\s*for.*?(\d+(?:,\d{3})*)",
+            r"[\$]\s*(\d+(?:,\d{3})*(?:\.\d{2})?)",
+            r"(\d+)k\s*(?:loan|dollar)",
+            r"(\d+)\s*thousand",
+            # 新增模式 - 处理 "loan 20000" 这种格式
+            r"loan\s+(\d+(?:,\d{3})*)",
+            r"loan\s*(\d{1,10})",
+            # 处理逗号分隔的数字
+            r"(?:^|,|\s)(?:loan\s*)?(\d{4,8})(?=\s*,|\s|$)",
+            # 处理更多格式
+            r"finance\s*(\d+(?:,\d{3})*)",
+            r"amount\s*(\d+(?:,\d{3})*)"
+        ]
+        
+        for pattern in amount_patterns:
+            match = re.search(pattern, conversation_text)
+            if match:
+                try:
+                    amount_str = match.group(1).replace(',', '')
+                    if 'k' in match.group(0) or 'thousand' in match.group(0):
+                        amount = float(amount_str) * 1000
+                    else:
+                        amount = float(amount_str)
+                    if 1000 <= amount <= 10000000:
+                        extracted["desired_loan_amount"] = amount
+                        print(f"✅ Loan amount extracted: {amount}")
+                    break
+                except (ValueError, IndexError):
+                    continue
+        
+        print(f"🔍 Enhanced extraction result: {extracted}")
+        return extracted
+
+    def _get_required_mvp_fields(self, profile: CustomerProfile) -> List[str]:
+        """根据资产类型获取需要问的MVP字段"""
+        required_fields = self.mvp_fields.copy()
+        
+        # 如果是motor_vehicle，添加车辆特定字段
+        if profile.asset_type == "motor_vehicle" or any(word in str(profile.asset_type or "").lower() for word in ["car", "vehicle", "truck"]):
+            required_fields.extend(self.vehicle_specific_fields)
+        
+        return required_fields
+
+    def _determine_conversation_stage(self, state: Dict, wants_lowest_rate: bool = False) -> ConversationStage:
+        """确定对话阶段 - MVP是必问问题，4轮后强制推荐"""
         profile = state["customer_profile"]
         asked_fields = state["asked_fields"]
+        round_count = state["round_count"]
         
-        if force_matching:
+        # 获取当前需要问的MVP字段
+        required_mvp_fields = self._get_required_mvp_fields(profile)
+        
+        # 检查已经有值的字段，自动标记为已问过
+        for field in required_mvp_fields:
+            if getattr(profile, field) is not None:
+                asked_fields.add(field)
+        
+        # 4轮对话限制：第4轮后必须给推荐
+        if round_count >= self.max_conversation_rounds:
+            print(f"🕒 Reached {self.max_conversation_rounds} rounds - forcing product matching")
             return ConversationStage.PRODUCT_MATCHING
         
-        # 检查MVP字段是否完成
-        required_mvp = self._get_required_mvp_fields(profile)
-        missing_mvp = [field for field in required_mvp if getattr(profile, field) is None]
+        # 如果用户要求推荐，无论MVP状态如何都直接进入产品匹配
+        if wants_lowest_rate:
+            print("🚀 User wants recommendations - jumping to product matching")
+            return ConversationStage.PRODUCT_MATCHING
         
-        if missing_mvp:
+        # 检查是否所有必要的MVP字段都已经问过
+        mvp_all_asked = all(field in asked_fields for field in required_mvp_fields)
+        
+        if mvp_all_asked:
+            # 所有MVP问题都问过了，检查偏好收集状态
+            preferences_completed = "preferences_completed" in asked_fields
+            if not preferences_completed:
+                return ConversationStage.PREFERENCE_COLLECTION
+            else:
+                return ConversationStage.PRODUCT_MATCHING
+        else:
+            # 还有MVP问题没问，继续收集MVP
             return ConversationStage.MVP_COLLECTION
+
+    async def _handle_mvp_collection(self, state: Dict) -> Dict[str, Any]:
+        """处理MVP收集阶段 - MVP是必问问题，每个字段只问一次"""
+        profile = state["customer_profile"]
+        asked_fields = state["asked_fields"]
+        round_count = state["round_count"]
         
-        # MVP完成，检查是否已问过偏好
-        if "preferences_asked" not in asked_fields:
-            return ConversationStage.PREFERENCE_COLLECTION
+        # 获取当前需要问的MVP字段
+        required_mvp_fields = self._get_required_mvp_fields(profile)
         
-        # 有推荐历史，进入推荐阶段
-        if state.get("last_recommendations"):
-            return ConversationStage.RECOMMENDATION
+        # 增强记忆功能：检查最近对话是否已经回答了问题
+        recent_context = " ".join([msg.get("content", "") for msg in state["conversation_history"][-4:]]).lower()
         
-        # 否则进入产品匹配
-        return ConversationStage.PRODUCT_MATCHING
+        for field in required_mvp_fields:
+            field_value = getattr(profile, field)
+            if field_value is not None:
+                asked_fields.add(field)
+                print(f"✅ Auto-marked {field} as asked (has value: {field_value})")
+            elif self._was_field_discussed_recently(field, recent_context):
+                asked_fields.add(field)
+                print(f"🧠 Auto-marked {field} as asked (recently discussed)")
+        
+        # 找出还没问过的字段
+        unasked_fields = [field for field in required_mvp_fields if field not in asked_fields]
+        print(f"🔍 Unasked MVP fields: {unasked_fields}")
+        
+        # 4轮限制检查
+        if round_count >= self.max_conversation_rounds:
+            print(f"🕒 Round {round_count} reached limit - moving to product matching")
+            return await self._handle_product_matching(state)
+        
+        if not unasked_fields:
+            # 所有MVP字段都问过了，进入偏好收集
+            print("✅ All MVP questions asked, moving to preference collection")
+            return await self._handle_preference_collection(state)
+        
+        # 按优先级选择字段询问 - 根据剩余轮数动态调整问题数量
+        priority_order = [
+            "loan_type", 
+            "asset_type", 
+            "credit_score", 
+            "business_structure",
+            "property_status",
+            "ABN_years",
+            "GST_years",
+            "vehicle_type", 
+            "vehicle_condition"
+        ]
+        
+        # 根据剩余轮数决定一次问几个字段
+        rounds_left = self.max_conversation_rounds - round_count
+        unasked_count = len(unasked_fields)
+        
+        if rounds_left <= 1:
+            # 最后一轮，问完所有剩余字段
+            fields_per_round = unasked_count
+        elif rounds_left == 2:
+            # 倒数第二轮，问一半以上
+            fields_per_round = max(3, (unasked_count + 1) // 2)
+        else:
+            # 还有多轮，可以少问一些
+            fields_per_round = max(2, unasked_count // rounds_left)
+        
+        print(f"📊 Rounds left: {rounds_left}, Unasked fields: {unasked_count}, Will ask: {fields_per_round}")
+        
+        # 按优先级排序未问过的字段
+        next_fields = []
+        for priority_field in priority_order:
+            if priority_field in unasked_fields:
+                next_fields.append(priority_field)
+                if len(next_fields) >= fields_per_round:
+                    break
+        
+        # 如果优先级字段不够，取剩余的字段
+        if len(next_fields) < fields_per_round:
+            remaining_fields = [f for f in unasked_fields if f not in next_fields]
+            next_fields.extend(remaining_fields[:fields_per_round-len(next_fields)])
+        
+        # 生成问题并标记为已问过
+        questions = []
+        for field in next_fields:
+            question = self._generate_field_question(field, profile)
+            if question:
+                questions.append(question)
+                asked_fields.add(field)  # 重要：问了就标记为已问过，不管客户是否回答
+                print(f"❓ Asking MVP question for {field}: {question}")
+        
+        if not questions:
+            # 没有问题要问，直接进入偏好收集
+            return await self._handle_preference_collection(state)
+        
+        rounds_left = self.max_conversation_rounds - round_count
+        message = f"To find the best loan products for you, I need to ask a few questions (Round {round_count}/{self.max_conversation_rounds}):\n\n"
+        message += "\n".join(f"• {q}" for q in questions)
+        
+        if rounds_left > 1:
+            message += "\n\nYou can also say 'show me options' to see recommendations with the information provided so far."
+        
+        return {
+            "message": message,
+            "next_questions": questions
+        }
+
+    def _was_field_discussed_recently(self, field_name: str, recent_context: str) -> bool:
+        """增强记忆功能：检查字段是否在最近对话中被讨论过"""
+        field_keywords = {
+            "ABN_years": ["abn", "business number", "australian business number"],
+            "GST_years": ["gst", "goods and services tax", "tax registration"],
+            "credit_score": ["credit", "score", "rating"],
+            "property_status": ["property", "own", "house", "home"],
+            "loan_type": ["business", "commercial", "personal", "consumer"],
+            "asset_type": ["vehicle", "car", "equipment", "machinery"],
+            "vehicle_type": ["passenger", "truck", "van", "motorcycle"],
+            "vehicle_condition": ["new", "used", "demonstrator"],
+            "business_structure": ["sole trader", "company", "trust", "partnership"]
+        }
+        
+        keywords = field_keywords.get(field_name, [field_name.replace("_", " ")])
+        return any(keyword in recent_context for keyword in keywords)
+
+    def _generate_field_question(self, field: str, profile: CustomerProfile) -> str:
+        """为特定字段生成问题"""
+        questions = {
+            "loan_type": "Is this for personal use or business use?",
+            "asset_type": "What type of asset are you looking to finance? (vehicle/equipment/machinery)",
+            "property_status": "Do you own property?",
+            "ABN_years": "How many years has your ABN been registered?",
+            "GST_years": "How many years have you been registered for GST?",
+            "credit_score": "What is your current credit score?",
+            "desired_loan_amount": "How much would you like to borrow?",
+            "vehicle_type": "What type of vehicle? (passenger car/truck/van/motorcycle)",
+            "vehicle_condition": "Are you looking at new or used vehicles?",
+            "business_structure": "Is your business a company, trust, partnership, or sole trader?"
+        }
+        return questions.get(field, f"Please provide your {field}")
 
     async def _handle_preference_collection(self, state: Dict, wants_lowest_rate: bool = False) -> Dict[str, Any]:
         """处理偏好收集阶段"""
@@ -683,7 +862,8 @@ class UnifiedIntelligentService:
         ])
         
         # 如果用户已经提供了偏好，直接进入产品匹配
-        if has_preferences:
+        last_message = state["conversation_history"][-1]["content"].lower() if state["conversation_history"] else ""
+        if has_preferences or "show me options" in last_message:
             asked_fields.add("preferences_completed")
             return await self._handle_product_matching(state)
         
@@ -714,12 +894,12 @@ class UnifiedIntelligentService:
             return await self._handle_product_matching(state)
 
     async def _handle_product_matching(self, state: Dict, is_adjustment: bool = False) -> Dict[str, Any]:
-        """🔧 修复：处理产品匹配阶段 - 添加调整支持和完整产品信息"""
-        print("🎯 Starting enhanced product matching...")
+        """处理产品匹配阶段"""
+        print("🎯 Starting product matching...")
         profile = state["customer_profile"]
         
-        # 🔧 修复：增强产品匹配，包含完整信息
-        recommendations = await self._ai_product_matching_with_lowest_rate_priority(profile)
+        # 直接进行产品匹配
+        recommendations = await self._ai_product_matching(profile)
         
         if not recommendations:
             print("❌ No recommendations found")
@@ -827,15 +1007,421 @@ class UnifiedIntelligentService:
         
         return message
 
-    async def _handle_general_conversation(self, state: Dict) -> Dict[str, Any]:
-        """处理一般对话"""
-        return {
-            "message": "I'm here to help you find the best loan options. What would you like to know about financing?",
-            "next_questions": []
-        }
+    async def _ai_product_matching(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
+        """AI产品匹配 - 基于comparison rate优先匹配最低利率"""
+        
+        print(f"🎯 Starting AI product matching...")
+        print(f"📊 Customer profile: loan_type={profile.loan_type}, asset_type={profile.asset_type}")
+        print(f"📊 Property status={profile.property_status}, credit_score={profile.credit_score}")
+        print(f"📊 ABN years={profile.ABN_years}, GST years={profile.GST_years}")
+        
+        try:
+            # 检查API密钥
+            if not self.anthropic_api_key:
+                print("⚠️ No Anthropic API key - using fallback recommendation")
+                return [self._create_comprehensive_fallback_recommendation(profile)]
+            
+            # 构建详细的客户档案
+            profile_summary = f"""
+Customer Profile Analysis:
+- Loan Type: {profile.loan_type or 'business'} loan for {profile.asset_type or 'vehicle'}
+- Property Owner: {profile.property_status or 'unknown'}
+- Credit Score: {profile.credit_score or 'not specified'}
+- Business: ABN {profile.ABN_years or 0} years, GST {profile.GST_years or 0} years
+- Business Structure: {profile.business_structure or 'not specified'}
+- Desired Loan Amount: ${profile.desired_loan_amount or 'not specified'}
+- Vehicle Details: {profile.vehicle_make or ''} {profile.vehicle_model or ''} ({profile.vehicle_condition or 'condition not specified'})
+"""
+
+            # 使用完整的产品文档
+            full_product_docs = ""
+            for lender, content in self.product_docs.items():
+                full_product_docs += f"\n\n=== {lender} PRODUCTS ===\n{content}\n"
+
+            # 增强的系统提示 - 重点要求详细的业务分析
+            system_prompt = f"""You are an expert loan product analyst. Analyze the customer profile against the complete product documentation and provide the BEST recommendation with detailed business logic.
+
+CUSTOMER PROFILE:
+{profile_summary}
+
+COMPLETE PRODUCT DOCUMENTATION:
+{full_product_docs}
+
+ANALYSIS REQUIREMENTS:
+1. Match customer profile against ALL product eligibility criteria
+2. Identify the BEST product with LOWEST COMPARISON RATE for this customer
+3. Extract ALL relevant requirements, conditions, and business rules
+4. Include specific eligibility assessments for this customer
+5. Provide complete fee structures and rate conditions
+6. Include detailed documentation requirements
+7. Explain any special conditions or rate loadings that apply
+8. **PRIORITIZE COMPARISON RATE** - recommend the product with lowest comparison rate that matches customer criteria
+
+Return ONLY valid JSON with this structure:
+{{
+    "lender_name": "RAF",
+    "product_name": "Vehicle Finance Premium (0-3 years)",
+    "base_rate": 6.89,
+    "comparison_rate": 7.12,
+    "monthly_payment": 1250,
+    "max_loan_amount": "$450,000",
+    "loan_term_options": "12-84 months",
+    "requirements_met": true,
+    "documentation_type": "Low Doc / Lite Doc / Full Doc",
+    
+    "detailed_requirements": {{
+        "minimum_credit_score": "600 (Premium tier customers)",
+        "abn_years_required": "2+ years (Premium tier requires 4+ years for asset-backed)",
+        "gst_years_required": "1+ years (Premium tier requires 2+ years)", 
+        "property_ownership": "Required for Premium tier (spouse property accepted)",
+        "deposit_required": "0% if asset-backed and property owner, 10% if non-asset-backed",
+        "business_structure": "Any structure accepted (Company/Trust preferred for Premium)",
+        "asset_age_limit": "Vehicle max 25 years at end-of-term (3 years for Premium rates)",
+        "asset_type_restrictions": "Motor vehicles, specific equipment types as per lender guidelines",
+        "income_verification": "Payslips, tax returns, financial statements as per doc level",
+        "special_conditions": "Tesla qualifies as premium asset, electric vehicle incentives may apply"
+    }},
+    
+    "fees_breakdown": {{
+        "establishment_fee": "$495 (dealer sale) / $745 (private sale)",
+        "monthly_account_fee": "$4.95",
+        "private_sale_surcharge": "$695 (if applicable)",
+        "ppsr_fee": "At cost (if asset value > $50,000)",
+        "brokerage_cap": "5.5% without rate impact, higher rates apply above this",
+        "early_termination_fee": "Varies by lender - see terms",
+        "variation_fee": "$60 per variation (if applicable)"
+    }},
+    
+    "rate_conditions": {{
+        "base_rate_explanation": "6.89% for new vehicles 0-3 years (Premium tier)",
+        "premium_tier_discount": "-0.50% discount for Premium tier qualification",
+        "rate_loadings": "+2% private sale, +2% classic car, +2% prime mover, +2% asset age >16 years",
+        "balloon_options": "Up to 50% (36m), 45% (48m), 40% (60m) for motor vehicles",
+        "maximum_cumulative_loading": "4% total rate loading cap",
+        "special_asset_rates": "Electric vehicles may qualify for preferential rates"
+    }},
+    
+    "documentation_requirements": [
+        "Completed application form and privacy consent",
+        "Asset and liability statement (all customers)",
+        "12-month ATO portal history (Lite-Doc and above)",
+        "Latest 2 BAS statements (Lite-Doc and above)",
+        "90-day bank statements (Full-Doc mandatory, Lite-Doc on request)",
+        "Recent financial statements or tax returns (Full-Doc)",
+        "Property ownership verification (rates notice, utility bill)",
+        "Vehicle purchase contract or invoice",
+        "Driver's license (all applicants)",
+        "Insurance certificate of currency (if NAF > $100,000)",
+        "Asset inspection report (private sales mandatory)"
+    ],
+    
+    "business_logic_assessment": {{
+        "customer_tier_qualification": "Premium tier - meets property and credit requirements",
+        "asset_assessment": "Tesla Model Y qualifies as premium electric vehicle",
+        "risk_factors": "New customer, electric vehicle specialty financing",
+        "competitive_advantages": "Low rate, premium lender, electric vehicle expertise",
+        "potential_issues": "None identified based on provided profile",
+        "alternative_products": "Consider Flexicommercial if business structure changes"
+    }}
+}}
+
+CRITICAL: Return ONLY the JSON object. No explanatory text."""
+
+            headers = {
+                "x-api-key": self.anthropic_api_key,
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01"
+            }
+
+            payload = {
+                "model": "claude-3-5-sonnet-20241022",
+                "max_tokens": 2000,
+                "temperature": 0.1,
+                "system": system_prompt,
+                "messages": [
+                    {"role": "user", "content": "Analyze this customer profile and provide the most suitable loan product recommendation with complete business analysis, prioritizing lowest comparison rate."}
+                ]
+            }
+
+            print(f"📤 Sending request to Claude API...")
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(self.api_url, headers=headers, json=payload)
+                
+                print(f"📥 Claude API response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    ai_response = result['content'][0]['text']
+                    
+                    print(f"🤖 Claude raw response (first 500 chars): {ai_response[:500]}...")
+                    
+                    # 使用强化的JSON清理方法
+                    clean_response = self._robust_json_cleaning(ai_response)
+                    
+                    if clean_response:
+                        try:
+                            recommendation = json.loads(clean_response)
+                            print(f"✅ Successfully parsed recommendation: {recommendation.get('lender_name', 'Unknown')}")
+                            print(f"📋 Product: {recommendation.get('product_name', 'Unknown')}")
+                            print(f"💰 Base Rate: {recommendation.get('base_rate', 'Unknown')}%")
+                            print(f"💳 Comparison Rate: {recommendation.get('comparison_rate', 'Unknown')}%")
+                            return [recommendation]
+                            
+                        except json.JSONDecodeError as e:
+                            print(f"❌ JSON parsing still failed: {e}")
+                            print(f"🔍 Clean content: {clean_response}")
+                            print("📄 Using comprehensive fallback recommendation...")
+                            return [self._create_comprehensive_fallback_recommendation(profile)]
+                    else:
+                        print("❌ Could not extract valid JSON from Claude response")
+                        print("📄 Using comprehensive fallback recommendation...")
+                        return [self._create_comprehensive_fallback_recommendation(profile)]
+                
+                else:
+                    print(f"❌ API error: {response.status_code} - {response.text[:200]}")
+                    return [self._create_comprehensive_fallback_recommendation(profile)]
+                    
+        except Exception as e:
+            print(f"❌ Unexpected error in AI product matching: {e}")
+            return [self._create_comprehensive_fallback_recommendation(profile)]
+
+    def _create_comprehensive_fallback_recommendation(self, profile: CustomerProfile) -> Dict[str, Any]:
+        """创建包含完整信息的智能后备推荐"""
+        
+        print("📄 Creating comprehensive fallback recommendation...")
+        print(f"📊 Profile analysis: property={profile.property_status}, credit={profile.credit_score}")
+        
+        # 估算贷款金额用于月供计算
+        loan_amount = profile.desired_loan_amount or 50000
+        term_months = 60
+        
+        # 智能规则匹配 - 基于comparison rate优先推荐最低利率
+        if (profile.property_status == "property_owner" and 
+            profile.credit_score and profile.credit_score >= 600):
+            print("✅ Matched: Property owner with good credit -> RAF Premium")
+            
+            base_rate = 6.89
+            comparison_rate = 7.12  # RAF's actual comparison rate
+            establishment_fee = 495
+            monthly_fee = 4.95
+            monthly_payment = self._calculate_monthly_payment(loan_amount, base_rate, term_months)
+            
+            return {
+                "lender_name": "RAF",
+                "product_name": "Vehicle Finance Premium (0-3 years)",
+                "base_rate": base_rate,
+                "comparison_rate": comparison_rate,
+                "monthly_payment": monthly_payment,
+                "max_loan_amount": "$450,000",
+                "loan_term_options": "12-60 months",
+                "requirements_met": True,
+                "documentation_type": "Low Doc",
+                
+                "detailed_requirements": {
+                    "minimum_credit_score": "600 (Premium tier)",
+                    "abn_years_required": "2+ years",
+                    "gst_years_required": "2+ years", 
+                    "property_ownership": "Required (or spouse property)",
+                    "deposit_required": "0% if asset-backed, 10% if non-asset-backed",
+                    "business_structure": "Any structure accepted",
+                    "asset_age_limit": "Vehicle max 25 years at end-of-term"
+                },
+                
+                "fees_breakdown": {
+                    "establishment_fee": "$495",
+                    "monthly_account_fee": "$4.95",
+                    "private_sale_surcharge": "$695",
+                    "ppsr_fee": "At cost",
+                    "brokerage_cap": "5.5% (no rate impact)"
+                },
+                
+                "rate_conditions": {
+                    "base_rate_range": "6.89% (new vehicles 0-3 years)",
+                    "premium_discount": "-0.50% for Premium tier customers",
+                    "rate_loadings": "+2% private sale, +2% classic car, +2% prime mover",
+                    "balloon_options": "Up to 50% (36m), 45% (48m), 40% (60m)"
+                },
+                
+                "documentation_requirements": [
+                    "Application and privacy consent",
+                    "Asset and liability statement",
+                    "12-month ATO portal history (Lite-Doc)",
+                    "2 latest BAS portals",
+                    "90-day bank statements (Full-Doc only)",
+                    "Recent financial statements (Full-Doc)"
+                ]
+            }
+        
+        elif profile.loan_type == "commercial" and profile.ABN_years and profile.ABN_years >= 4:
+            print("✅ Matched: Established business -> FCAU FlexiPremium")
+            
+            base_rate = 6.85
+            comparison_rate = 7.15  # FCAU's comparison rate
+            establishment_fee = 495
+            monthly_fee = 4.95
+            monthly_payment = self._calculate_monthly_payment(loan_amount, base_rate, term_months)
+            
+            return {
+                "lender_name": "FCAU",
+                "product_name": "FlexiPremium Standard",
+                "base_rate": base_rate,
+                "comparison_rate": comparison_rate,
+                "monthly_payment": monthly_payment,
+                "max_loan_amount": "$500,000",
+                "loan_term_options": "12-84 months",
+                "requirements_met": True,
+                "documentation_type": "Standard",
+                
+                "detailed_requirements": {
+                    "minimum_credit_score": "Clear Equifax file required",
+                    "abn_years_required": "4+ years (asset-backed) or 8+ years (non-asset-backed)",
+                    "gst_years_required": "4+ years",
+                    "property_ownership": "Asset-backed or non-asset-backed accepted",
+                    "business_structure": "Company, Trust, or Partnership only",
+                    "asset_age_limit": "Primary: 20 years, Secondary: 7 years"
+                },
+                
+                "fees_breakdown": {
+                    "establishment_fee": "$495 (dealer), $745 (private)",
+                    "monthly_account_fee": "$4.95",
+                    "ppsr_fee": "At cost",
+                    "brokerage_cap": "3% (FlexiPremium special cap)"
+                },
+                
+                "rate_conditions": {
+                    "base_rate_grid": "6.85% (50k-100k), 6.85% (100k-500k)",
+                    "rate_loadings": "+1% prime mover/private sale, +1.25% non-asset-backed",
+                    "maximum_cumulative_uplift": "4%"
+                },
+                
+                "documentation_requirements": [
+                    "Standard application",
+                    "Privacy consent",
+                    "Asset and liability statement", 
+                    "Clear Equifax file",
+                    "Asset inspection (broker or digital)",
+                    "Statutory declaration (if required)"
+                ]
+            }
+        
+        elif (profile.asset_type == "motor_vehicle" and 
+              profile.credit_score and profile.credit_score >= 550):
+            print("✅ Matched: Vehicle loan with decent credit -> BFS Prime")
+            
+            base_rate = 9.50
+            comparison_rate = 10.20  # BFS comparison rate
+            establishment_fee = 490
+            monthly_fee = 8.00
+            monthly_payment = self._calculate_monthly_payment(loan_amount, base_rate, term_months)
+            
+            return {
+                "lender_name": "BFS",
+                "product_name": "Prime Consumer Vehicle Loan",
+                "base_rate": base_rate,
+                "comparison_rate": comparison_rate,
+                "monthly_payment": monthly_payment,
+                "max_loan_amount": "$250,000",
+                "loan_term_options": "12-84 months",
+                "requirements_met": True,
+                "documentation_type": "Standard",
+                
+                "detailed_requirements": {
+                    "minimum_credit_score": "600 (or 500 with 20% deposit)",
+                    "income_verification": "Most recent payslip with YTD figures",
+                    "deposit_required": "20% if credit score 500-599",
+                    "vehicle_usage": "50%+ personal use",
+                    "asset_age_limit": "13 years (≤60m terms), 7 years (>60m terms)"
+                },
+                
+                "fees_breakdown": {
+                    "establishment_fee": "$490 (consumer), $590 (private sale)",
+                    "monthly_account_fee": "$8.00",
+                    "early_termination_fee": "$750 reducing over time",
+                    "private_sale_surcharge": "+0.50% rate loading"
+                },
+                
+                "rate_conditions": {
+                    "base_rate_range": "8.80%-12.40% based on credit score",
+                    "asset_backed_rates": "Lower rates for asset-backed loans",
+                    "balloon_options": "Limited commercial use only"
+                },
+                
+                "documentation_requirements": [
+                    "Most recent payslip (including YTD)",
+                    "Proof of identity and residency",
+                    "Vehicle purchase contract/invoice",
+                    "Insurance certificate of currency",
+                    "Bank statements (if required for capacity)"
+                ]
+            }
+        
+        else:
+            print("✅ Default match: General purpose -> Angle Finance")
+            
+            base_rate = 10.75
+            comparison_rate = 11.45  # Angle comparison rate
+            establishment_fee = 540
+            monthly_fee = 4.95
+            monthly_payment = self._calculate_monthly_payment(loan_amount, base_rate, term_months)
+            
+            return {
+                "lender_name": "Angle",
+                "product_name": "Primary Asset Finance",
+                "base_rate": base_rate,
+                "comparison_rate": comparison_rate,
+                "monthly_payment": monthly_payment,
+                "max_loan_amount": "$100,000 (Low Doc)",
+                "loan_term_options": "12-60 months",
+                "requirements_met": True,
+                "documentation_type": "Low Doc",
+                
+                "detailed_requirements": {
+                    "minimum_credit_score": "500-650 range",
+                    "abn_years_required": "2+ years",
+                    "gst_years_required": "1+ years",
+                    "property_ownership": "Preferred but not required",
+                    "deposit_required": "20% if non-property owner",
+                    "business_structure": "Any structure",
+                    "asset_age_limit": "Varies by asset type"
+                },
+                
+                "fees_breakdown": {
+                    "establishment_fee": "$540 (dealer), $700 (private)",
+                    "monthly_account_fee": "$4.95",
+                    "brokerage_cap": "Up to 8% (with rate loading)"
+                },
+                
+                "rate_conditions": {
+                    "base_rate_range": "7.99%-16.95% depending on product",
+                    "rate_loadings": "Various based on risk factors",
+                    "balloon_options": "Limited availability"
+                },
+                
+                "documentation_requirements": [
+                    "Application form",
+                    "Privacy consent", 
+                    "6 months bank statements (Full Doc)",
+                    "Financial statements (if required)",
+                    "Asset inspection reports"
+                ]
+            }
+
+    def _calculate_monthly_payment(self, loan_amount: float, annual_rate: float, term_months: int) -> float:
+        """计算月供"""
+        if loan_amount <= 0 or annual_rate <= 0 or term_months <= 0:
+            return 0
+        
+        monthly_rate = annual_rate / 100 / 12
+        
+        if monthly_rate == 0:
+            return loan_amount / term_months
+        
+        monthly_payment = loan_amount * (monthly_rate * (1 + monthly_rate) ** term_months) / ((1 + monthly_rate) ** term_months - 1)
+        return round(monthly_payment, 2)
 
     def _serialize_customer_profile(self, profile: CustomerProfile) -> Dict[str, Any]:
-        """序列化客户档案"""
+        """序列化客户档案为字典"""
         return {
             "loan_type": profile.loan_type,
             "asset_type": profile.asset_type,
@@ -844,145 +1430,21 @@ class UnifiedIntelligentService:
             "GST_years": profile.GST_years,
             "credit_score": profile.credit_score,
             "business_structure": profile.business_structure,
+            "desired_loan_amount": profile.desired_loan_amount,
             "vehicle_type": profile.vehicle_type,
             "vehicle_condition": profile.vehicle_condition,
             "vehicle_make": profile.vehicle_make,
             "vehicle_model": profile.vehicle_model,
-            "vehicle_year": profile.vehicle_year,
-            "desired_loan_amount": profile.desired_loan_amount,
-            "loan_term_preference": profile.loan_term_preference,
             "interest_rate_ceiling": profile.interest_rate_ceiling,
             "monthly_budget": profile.monthly_budget,
-            "preferred_term": profile.preferred_term,
-            "min_loan_amount": profile.min_loan_amount,
-            "documentation_preference": profile.documentation_preference
+            "loan_term_preference": profile.loan_term_preference
         }
 
-    async def process_conversation(self, user_message: str, session_id: str = "default", 
-                                 chat_history: List[Dict] = None, current_customer_info: Dict = None) -> Dict[str, Any]:
-        """处理对话的主入口函数"""
-        
-        print(f"\n🔄 Processing conversation - Session: {session_id}")
-        print(f"📝 User message: {user_message}")
-        print(f"📊 Current customer info: {current_customer_info}")
-        
-        # 🔧 修复2：检查是否需要重置会话
-        if session_id in self.conversation_states:
-            current_profile = self.conversation_states[session_id]["customer_profile"]
-            if self._detect_session_reset_needed(user_message, current_profile):
-                print("🔄 Resetting session for new case")
-                del self.conversation_states[session_id]
-        
-        # 获取或创建会话状态
-        if session_id not in self.conversation_states:
-            self.conversation_states[session_id] = {
-                "stage": ConversationStage.MVP_COLLECTION,
-                "customer_profile": CustomerProfile(),
-                "conversation_history": [],
-                "asked_fields": set(),
-                "round_count": 0,
-                "last_recommendations": []
-            }
-        
-        state = self.conversation_states[session_id]
-        state["round_count"] += 1
-        
-        # 🔧 修复1：改进客户信息同步逻辑
-        if current_customer_info:
-            print(f"🔄 Syncing customer info from frontend...")
-            self._sync_customer_info_from_form(state["customer_profile"], current_customer_info)
-        
-        # 重要：使用完整的聊天历史，而不是覆盖
-        if chat_history:
-            # 如果前端提供了完整历史，使用它
-            state["conversation_history"] = chat_history[:]
-        
-        # 添加当前消息到历史
-        state["conversation_history"].append({"role": "user", "content": user_message})
-        
-        # 🔧 修复2：增强信息提取，添加详细调试
-        print(f"🔍 Starting information extraction...")
-        extracted_info = await self._extract_mvp_and_preferences_enhanced(state["conversation_history"])
-        print(f"🔍 Extracted info: {extracted_info}")
-        
-        # 🔧 修复3：优化更新策略
-        self._update_customer_profile_with_priority(state["customer_profile"], extracted_info, current_customer_info)
-        print(f"📊 Updated profile: {self._serialize_customer_profile(state['customer_profile'])}")
-        
-        # 检查已经有值的字段，自动标记为已问过
-        required_mvp_fields = self._get_required_mvp_fields(state["customer_profile"])
-        for field in required_mvp_fields:
-            if getattr(state["customer_profile"], field) is not None:
-                state["asked_fields"].add(field)
-        
-        # 🔧 修复3：检查是否是贷款金额调整
-        amount_change_patterns = [
-            r"change.{0,20}amount.{0,20}(\d{1,3}(?:,?\d{3})*)",
-            r"loan.{0,20}amount.{0,20}(\d{1,3}(?:,?\d{3})*)",
-            r"(\d{1,3}(?:,?\d{3})*).{0,20}instead",
-            r"update.{0,20}(\d{1,3}(?:,?\d{3})*)"
-        ]
-        
-        for pattern in amount_change_patterns:
-            match = re.search(pattern, user_message.lower().replace(",", ""))
-            if match:
-                try:
-                    new_amount = float(match.group(1).replace(",", ""))
-                    if new_amount > 10000:  # 确保是合理的贷款金额
-                        return await self._handle_loan_amount_update(state, new_amount)
-                except (ValueError, IndexError):
-                    continue
-        
-        # 检查是否是调整要求
-        user_message_lower = user_message.lower()
-        is_adjustment_request = any(phrase in user_message_lower for phrase in [
-            "adjust", "change", "modify", "different", "lower rate", "higher amount", 
-            "longer term", "shorter term", "better option", "other option"
-        ])
-        
-        # 检查用户是否要求最低利率或推荐
-        wants_lowest_rate = any(phrase in user_message_lower for phrase in [
-            "lowest interest rate", "lowest rate", "best rate", "cheapest rate",
-            "show me options", "see recommendations", "recommend products", "show options"
-        ])
-        
-        # 确定对话阶段
-        new_stage = self._determine_conversation_stage(state, wants_lowest_rate or is_adjustment_request)
-        print(f"🎯 Current stage: {new_stage}")
-        print(f"📝 Asked fields: {state['asked_fields']}")
-        state["stage"] = new_stage
-        
-        # 生成响应
-        try:
-            if new_stage == ConversationStage.MVP_COLLECTION:
-                response = await self._handle_mvp_collection(state)
-            elif new_stage == ConversationStage.PREFERENCE_COLLECTION:
-                response = await self._handle_preference_collection(state, wants_lowest_rate)
-            elif new_stage == ConversationStage.PRODUCT_MATCHING:
-                response = await self._handle_product_matching(state, is_adjustment_request)
-            elif new_stage == ConversationStage.RECOMMENDATION:
-                response = await self._handle_recommendation(state, is_adjustment_request)
-            else:
-                response = await self._handle_general_conversation(state)
-        except Exception as e:
-            print(f"❌ Error in stage handling: {e}")
-            response = {
-                "message": "I'm having some trouble processing your request. Let me ask you a simple question to get back on track: What type of loan are you looking for?",
-                "recommendations": []
-            }
-        
-        # 添加助手回复到历史
-        state["conversation_history"].append({"role": "assistant", "content": response["message"]})
-        
+    async def _handle_general_conversation(self, state: Dict) -> Dict[str, Any]:
+        """处理一般对话"""
         return {
-            "reply": response["message"],
-            "session_id": session_id,
-            "stage": new_stage.value,
-            "customer_profile": self._serialize_customer_profile(state["customer_profile"]),
-            "recommendations": response.get("recommendations", []),
-            "next_questions": response.get("next_questions", []),
-            "round_count": state["round_count"],
-            "status": "success"
+            "message": "How can I help you with your loan requirements today?",
+            "next_questions": []
         }
 
     async def get_conversation_status(self, session_id: str) -> Dict[str, Any]:
