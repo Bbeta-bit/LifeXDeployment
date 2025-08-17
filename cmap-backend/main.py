@@ -1,4 +1,4 @@
-# main.py - 诊断版本（增加详细日志和错误处理）
+# main.py - Claude API版本（直接调用Anthropic API）
 import os
 import json
 import time
@@ -15,13 +15,37 @@ load_dotenv()
 
 # 全局变量
 conversation_memory = {}
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# 支持多种API密钥名称
+ANTHROPIC_API_KEY = (
+    os.getenv("ANTHROPIC_API_KEY") or 
+    os.getenv("CLAUDE_API_KEY") or 
+    os.getenv("OPENROUTER_API_KEY")  # 向后兼容
+)
+
+# API配置
+if ANTHROPIC_API_KEY and ANTHROPIC_API_KEY.startswith("sk-ant-"):
+    # 直接使用Anthropic API
+    API_URL = "https://api.anthropic.com/v1/messages"
+    API_TYPE = "anthropic"
+    MODEL_NAME = "claude-3-haiku-20240307"
+elif ANTHROPIC_API_KEY and ANTHROPIC_API_KEY.startswith("sk-or-"):
+    # 使用OpenRouter API
+    API_URL = "https://openrouter.ai/api/v1/chat/completions"
+    API_TYPE = "openrouter"
+    MODEL_NAME = "anthropic/claude-3-haiku"
+else:
+    API_URL = None
+    API_TYPE = None
+    MODEL_NAME = None
 
 print(f"🚀 LIFEX Car Loan AI Agent starting...")
-print(f"🔑 API Key configured: {'✅' if OPENROUTER_API_KEY else '❌'}")
-if OPENROUTER_API_KEY:
-    print(f"🔑 API Key preview: {OPENROUTER_API_KEY[:15]}...{OPENROUTER_API_KEY[-4:]}")
+print(f"🔑 API Key configured: {'✅' if ANTHROPIC_API_KEY else '❌'}")
+print(f"🔗 API Type: {API_TYPE}")
+print(f"🤖 Model: {MODEL_NAME}")
+
+if ANTHROPIC_API_KEY:
+    print(f"🔑 API Key preview: {ANTHROPIC_API_KEY[:15]}...{ANTHROPIC_API_KEY[-4:]}")
 
 def cleanup_old_sessions():
     """清理超过1小时的旧会话"""
@@ -74,48 +98,65 @@ def validate_customer_info(customer_info):
     
     return cleaned
 
-async def test_openrouter_connection():
-    """测试OpenRouter API连接"""
-    if not OPENROUTER_API_KEY:
+async def test_api_connection():
+    """测试API连接"""
+    if not ANTHROPIC_API_KEY:
         return {"success": False, "error": "No API key configured"}
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # 测试简单的API调用
-            test_response = await client.post(
-                OPENROUTER_API_URL,
-                json={
-                    "model": "anthropic/claude-3-haiku",
-                    "messages": [{"role": "user", "content": "Hello"}],
-                    "max_tokens": 10
-                },
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://lifex-backend.onrender.com",
-                    "X-Title": "LIFEX Car Loan Agent Test"
-                }
-            )
+            if API_TYPE == "anthropic":
+                # 测试Anthropic API
+                test_response = await client.post(
+                    API_URL,
+                    json={
+                        "model": MODEL_NAME,
+                        "max_tokens": 10,
+                        "messages": [{"role": "user", "content": "Hello"}]
+                    },
+                    headers={
+                        "x-api-key": ANTHROPIC_API_KEY,
+                        "Content-Type": "application/json",
+                        "anthropic-version": "2023-06-01"
+                    }
+                )
+            else:
+                # 测试OpenRouter API
+                test_response = await client.post(
+                    API_URL,
+                    json={
+                        "model": MODEL_NAME,
+                        "messages": [{"role": "user", "content": "Hello"}],
+                        "max_tokens": 10
+                    },
+                    headers={
+                        "Authorization": f"Bearer {ANTHROPIC_API_KEY}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://lifex-backend.onrender.com",
+                        "X-Title": "LIFEX Car Loan Agent Test"
+                    }
+                )
             
             if test_response.status_code == 200:
-                return {"success": True, "status_code": 200}
+                return {"success": True, "status_code": 200, "api_type": API_TYPE}
             else:
                 error_text = test_response.text
                 return {
                     "success": False, 
                     "status_code": test_response.status_code,
-                    "error": error_text
+                    "error": error_text,
+                    "api_type": API_TYPE
                 }
                 
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "api_type": API_TYPE}
 
 async def call_ai_service(message, session_data):
-    """AI服务调用 - 增强诊断"""
-    if not OPENROUTER_API_KEY:
-        raise Exception("OpenRouter API key not configured")
+    """AI服务调用 - 支持Anthropic和OpenRouter"""
+    if not ANTHROPIC_API_KEY:
+        raise Exception("API key not configured")
     
-    print(f"🤖 Starting AI service call for message: {message[:50]}...")
+    print(f"🤖 Starting AI service call ({API_TYPE}) for message: {message[:50]}...")
     
     # 构建系统提示
     system_prompt = """You are Agent X, a professional car loan advisor specializing in Australian car loans. Help customers find the best car loan options.
@@ -138,55 +179,75 @@ Guidelines:
             system_prompt += f"\n\nCustomer context: {', '.join(context_items)}"
     
     # 构建消息历史（最近6条消息）
-    messages = [{"role": "system", "content": system_prompt}]
     recent_messages = session_data["messages"][-6:]
     
-    for msg in recent_messages:
-        messages.append({"role": msg["role"], "content": msg["content"]})
-    
-    # 当前消息
-    messages.append({"role": "user", "content": message})
-    
-    print(f"🔄 Preparing API call with {len(messages)} messages")
-    
-    # 调用API（增强重试逻辑和诊断）
+    # 调用API（根据类型使用不同格式）
     async with httpx.AsyncClient(timeout=60.0) as client:
         for attempt in range(3):  # 3次重试
             try:
-                print(f"🔄 AI API attempt {attempt + 1}/3")
+                print(f"🔄 AI API attempt {attempt + 1}/3 ({API_TYPE})")
                 
-                # 记录请求详情
-                request_payload = {
-                    "model": "anthropic/claude-3-haiku",
-                    "messages": messages,
-                    "max_tokens": 1000,
-                    "temperature": 0.7
-                }
+                if API_TYPE == "anthropic":
+                    # Anthropic API格式
+                    messages = []
+                    for msg in recent_messages:
+                        messages.append({"role": msg["role"], "content": msg["content"]})
+                    messages.append({"role": "user", "content": message})
+                    
+                    request_payload = {
+                        "model": MODEL_NAME,
+                        "max_tokens": 1000,
+                        "messages": messages,
+                        "system": system_prompt
+                    }
+                    
+                    headers = {
+                        "x-api-key": ANTHROPIC_API_KEY,
+                        "Content-Type": "application/json",
+                        "anthropic-version": "2023-06-01"
+                    }
+                    
+                else:
+                    # OpenRouter API格式
+                    messages = [{"role": "system", "content": system_prompt}]
+                    for msg in recent_messages:
+                        messages.append({"role": msg["role"], "content": msg["content"]})
+                    messages.append({"role": "user", "content": message})
+                    
+                    request_payload = {
+                        "model": MODEL_NAME,
+                        "messages": messages,
+                        "max_tokens": 1000,
+                        "temperature": 0.7
+                    }
+                    
+                    headers = {
+                        "Authorization": f"Bearer {ANTHROPIC_API_KEY}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://lifex-backend.onrender.com",
+                        "X-Title": "LIFEX Car Loan Agent"
+                    }
                 
-                headers = {
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://lifex-backend.onrender.com",
-                    "X-Title": "LIFEX Car Loan Agent"
-                }
-                
-                print(f"📤 Sending request to: {OPENROUTER_API_URL}")
+                print(f"📤 Sending request to: {API_URL}")
                 print(f"📤 Model: {request_payload['model']}")
-                print(f"📤 Message count: {len(request_payload['messages'])}")
-                print(f"📤 Headers: {list(headers.keys())}")
+                print(f"📤 Message count: {len(request_payload['messages']) if 'messages' in request_payload else 'system+messages'}")
                 
                 response = await client.post(
-                    OPENROUTER_API_URL,
+                    API_URL,
                     json=request_payload,
                     headers=headers
                 )
                 
                 print(f"📥 Response status: {response.status_code}")
-                print(f"📥 Response headers: {dict(response.headers)}")
                 
                 if response.status_code == 200:
                     result = response.json()
-                    ai_response = result["choices"][0]["message"]["content"]
+                    
+                    if API_TYPE == "anthropic":
+                        ai_response = result["content"][0]["text"]
+                    else:
+                        ai_response = result["choices"][0]["message"]["content"]
+                    
                     print(f"✅ AI API success on attempt {attempt + 1}")
                     print(f"✅ Response length: {len(ai_response)} characters")
                     return ai_response
@@ -209,19 +270,6 @@ Guidelines:
                     raise e
                     
                 await asyncio.sleep(2 ** attempt)  # 指数退避
-
-def run_async_in_thread(coro):
-    """在线程中运行异步函数"""
-    def run_in_thread():
-        try:
-            # 创建新的事件循环
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
-    
-    return run_in_thread
 
 def generate_recommendations(customer_info):
     """生成车贷推荐"""
@@ -326,7 +374,7 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
         response = {
             "message": "LIFEX Car Loan AI Agent API",
             "status": "running",
-            "version": "4.3-diagnostic",
+            "version": "4.3-claude-api",
             "endpoints": {
                 "health": "/health",
                 "chat": "/chat",
@@ -335,9 +383,10 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
                 "reset_session": "/reset-session"
             },
             "features": {
-                "ai_enabled": bool(OPENROUTER_API_KEY),
-                "cors_enabled": True,
-                "diagnostic_mode": True
+                "ai_enabled": bool(ANTHROPIC_API_KEY),
+                "api_type": API_TYPE,
+                "model": MODEL_NAME,
+                "cors_enabled": True
             }
         }
         self._send_json_response(200, response)
@@ -348,12 +397,13 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
             "status": "healthy",
             "timestamp": time.time(),
             "message": "LIFEX Car Loan AI Agent is running",
-            "version": "4.3-diagnostic",
+            "version": "4.3-claude-api",
             "features": {
-                "api_key_configured": bool(OPENROUTER_API_KEY),
+                "api_key_configured": bool(ANTHROPIC_API_KEY),
+                "api_type": API_TYPE,
+                "model": MODEL_NAME,
                 "cors_enabled": True,
-                "active_sessions": len(conversation_memory),
-                "diagnostic_mode": True
+                "active_sessions": len(conversation_memory)
             }
         }
         self._send_json_response(200, response)
@@ -368,7 +418,7 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    return loop.run_until_complete(test_openrouter_connection())
+                    return loop.run_until_complete(test_api_connection())
                 finally:
                     loop.close()
             
@@ -378,18 +428,28 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
             
             self._send_json_response(200, {
                 "test_result": test_result,
-                "timestamp": time.time()
+                "timestamp": time.time(),
+                "config": {
+                    "api_type": API_TYPE,
+                    "model": MODEL_NAME,
+                    "api_url": API_URL
+                }
             })
             
         except Exception as e:
             print(f"❌ AI test error: {e}")
             self._send_json_response(500, {
                 "error": f"AI test failed: {str(e)}",
-                "timestamp": time.time()
+                "timestamp": time.time(),
+                "config": {
+                    "api_type": API_TYPE,
+                    "model": MODEL_NAME,
+                    "api_url": API_URL
+                }
             })
     
     def _handle_chat(self, data):
-        """处理聊天请求 - 增强诊断"""
+        """处理聊天请求"""
         try:
             message = data.get("message", "").strip()
             session_id = data.get("session_id", f"session_{int(time.time())}")
@@ -400,10 +460,9 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
                 return
             
             print(f"📨 Chat request: session={session_id}, message_len={len(message)}")
-            print(f"📨 Customer info fields: {list(customer_info.keys()) if customer_info else 'None'}")
             
             # 检查API密钥
-            if not OPENROUTER_API_KEY:
+            if not ANTHROPIC_API_KEY:
                 print(f"❌ No API key configured")
                 self._send_error_response(500, "AI service not configured - no API key")
                 return
@@ -424,9 +483,9 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
             }
             session_data["messages"].append(user_message)
             
-            # 调用AI服务（增强诊断）
+            # 调用AI服务
             try:
-                print(f"🤖 Starting AI call...")
+                print(f"🤖 Starting AI call ({API_TYPE})...")
                 
                 # 使用线程池执行方式
                 import concurrent.futures
