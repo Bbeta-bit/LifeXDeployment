@@ -414,7 +414,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
   return (
     <div className="h-full flex flex-col" style={{ backgroundColor: '#fef7e8' }}>
       {/* 顶部状态栏 */}
-      <div className="flex-shrink-0 px-6 py-3 border-b bg-white shadow-sm">
+      <div className="flex-shrink-0 px-6 py-3 border-b shadow-sm" style={{ backgroundColor: '#fef7e8' }}>
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-3">
             <h2 className="text-lg font-semibold text-gray-800">Agent X</h2>
