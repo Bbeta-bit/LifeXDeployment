@@ -1,4 +1,4 @@
-# main.py - 修复版本（移除Basic Mode，确保AI服务正常）
+# main.py - 诊断版本（增加详细日志和错误处理）
 import os
 import json
 import time
@@ -20,6 +20,8 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 print(f"🚀 LIFEX Car Loan AI Agent starting...")
 print(f"🔑 API Key configured: {'✅' if OPENROUTER_API_KEY else '❌'}")
+if OPENROUTER_API_KEY:
+    print(f"🔑 API Key preview: {OPENROUTER_API_KEY[:15]}...{OPENROUTER_API_KEY[-4:]}")
 
 def cleanup_old_sessions():
     """清理超过1小时的旧会话"""
@@ -72,10 +74,48 @@ def validate_customer_info(customer_info):
     
     return cleaned
 
+async def test_openrouter_connection():
+    """测试OpenRouter API连接"""
+    if not OPENROUTER_API_KEY:
+        return {"success": False, "error": "No API key configured"}
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # 测试简单的API调用
+            test_response = await client.post(
+                OPENROUTER_API_URL,
+                json={
+                    "model": "anthropic/claude-3-haiku",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "max_tokens": 10
+                },
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://lifex-backend.onrender.com",
+                    "X-Title": "LIFEX Car Loan Agent Test"
+                }
+            )
+            
+            if test_response.status_code == 200:
+                return {"success": True, "status_code": 200}
+            else:
+                error_text = test_response.text
+                return {
+                    "success": False, 
+                    "status_code": test_response.status_code,
+                    "error": error_text
+                }
+                
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 async def call_ai_service(message, session_data):
-    """AI服务调用"""
+    """AI服务调用 - 增强诊断"""
     if not OPENROUTER_API_KEY:
         raise Exception("OpenRouter API key not configured")
+    
+    print(f"🤖 Starting AI service call for message: {message[:50]}...")
     
     # 构建系统提示
     system_prompt = """You are Agent X, a professional car loan advisor specializing in Australian car loans. Help customers find the best car loan options.
@@ -107,43 +147,67 @@ Guidelines:
     # 当前消息
     messages.append({"role": "user", "content": message})
     
-    # 调用API（增强重试逻辑）
+    print(f"🔄 Preparing API call with {len(messages)} messages")
+    
+    # 调用API（增强重试逻辑和诊断）
     async with httpx.AsyncClient(timeout=60.0) as client:
-        for attempt in range(3):  # 增加到3次重试
+        for attempt in range(3):  # 3次重试
             try:
                 print(f"🔄 AI API attempt {attempt + 1}/3")
                 
+                # 记录请求详情
+                request_payload = {
+                    "model": "anthropic/claude-3-haiku",
+                    "messages": messages,
+                    "max_tokens": 1000,
+                    "temperature": 0.7
+                }
+                
+                headers = {
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://lifex-backend.onrender.com",
+                    "X-Title": "LIFEX Car Loan Agent"
+                }
+                
+                print(f"📤 Sending request to: {OPENROUTER_API_URL}")
+                print(f"📤 Model: {request_payload['model']}")
+                print(f"📤 Message count: {len(request_payload['messages'])}")
+                print(f"📤 Headers: {list(headers.keys())}")
+                
                 response = await client.post(
                     OPENROUTER_API_URL,
-                    json={
-                        "model": "anthropic/claude-3-haiku",
-                        "messages": messages,
-                        "max_tokens": 1000,
-                        "temperature": 0.7
-                    },
-                    headers={
-                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://lifex-backend.onrender.com",
-                        "X-Title": "LIFEX Car Loan Agent"
-                    }
+                    json=request_payload,
+                    headers=headers
                 )
+                
+                print(f"📥 Response status: {response.status_code}")
+                print(f"📥 Response headers: {dict(response.headers)}")
                 
                 if response.status_code == 200:
                     result = response.json()
                     ai_response = result["choices"][0]["message"]["content"]
                     print(f"✅ AI API success on attempt {attempt + 1}")
+                    print(f"✅ Response length: {len(ai_response)} characters")
                     return ai_response
                 else:
-                    error_text = await response.aread() if hasattr(response, 'aread') else response.text
-                    print(f"⚠️ AI API returned {response.status_code}: {error_text}")
+                    error_text = response.text
+                    print(f"❌ AI API returned {response.status_code}: {error_text}")
+                    
+                    # 如果是认证错误或其他严重错误，不要重试
+                    if response.status_code in [401, 403]:
+                        raise Exception(f"Authentication error {response.status_code}: {error_text}")
+                    
                     if attempt == 2:  # 最后一次尝试
                         raise Exception(f"API returned {response.status_code}: {error_text}")
                     
             except Exception as e:
-                print(f"⚠️ AI API attempt {attempt + 1} failed: {e}")
+                print(f"❌ AI API attempt {attempt + 1} failed: {str(e)}")
+                print(f"❌ Exception type: {type(e).__name__}")
+                
                 if attempt == 2:  # 最后一次尝试
                     raise e
+                    
                 await asyncio.sleep(2 ** attempt)  # 指数退避
 
 def run_async_in_thread(coro):
@@ -228,6 +292,8 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
             self._handle_root()
         elif path == '/health':
             self._handle_health()
+        elif path == '/test-ai':
+            self._handle_test_ai()
         elif path.startswith('/session-status/'):
             session_id = path.split('/')[-1]
             self._handle_session_status(session_id)
@@ -260,17 +326,18 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
         response = {
             "message": "LIFEX Car Loan AI Agent API",
             "status": "running",
-            "version": "4.3-fixed",
+            "version": "4.3-diagnostic",
             "endpoints": {
                 "health": "/health",
                 "chat": "/chat",
+                "test_ai": "/test-ai",
                 "session_status": "/session-status/{session_id}",
                 "reset_session": "/reset-session"
             },
             "features": {
                 "ai_enabled": bool(OPENROUTER_API_KEY),
                 "cors_enabled": True,
-                "basic_mode_removed": True
+                "diagnostic_mode": True
             }
         }
         self._send_json_response(200, response)
@@ -281,18 +348,48 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
             "status": "healthy",
             "timestamp": time.time(),
             "message": "LIFEX Car Loan AI Agent is running",
-            "version": "4.3-fixed",
+            "version": "4.3-diagnostic",
             "features": {
                 "api_key_configured": bool(OPENROUTER_API_KEY),
                 "cors_enabled": True,
                 "active_sessions": len(conversation_memory),
-                "basic_mode_removed": True
+                "diagnostic_mode": True
             }
         }
         self._send_json_response(200, response)
     
+    def _handle_test_ai(self):
+        """测试AI连接"""
+        try:
+            # 使用线程运行异步测试
+            import concurrent.futures
+            
+            def run_test():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(test_openrouter_connection())
+                finally:
+                    loop.close()
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_test)
+                test_result = future.result(timeout=60)
+            
+            self._send_json_response(200, {
+                "test_result": test_result,
+                "timestamp": time.time()
+            })
+            
+        except Exception as e:
+            print(f"❌ AI test error: {e}")
+            self._send_json_response(500, {
+                "error": f"AI test failed: {str(e)}",
+                "timestamp": time.time()
+            })
+    
     def _handle_chat(self, data):
-        """处理聊天请求 - 移除Basic Mode"""
+        """处理聊天请求 - 增强诊断"""
         try:
             message = data.get("message", "").strip()
             session_id = data.get("session_id", f"session_{int(time.time())}")
@@ -303,10 +400,12 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
                 return
             
             print(f"📨 Chat request: session={session_id}, message_len={len(message)}")
+            print(f"📨 Customer info fields: {list(customer_info.keys()) if customer_info else 'None'}")
             
             # 检查API密钥
             if not OPENROUTER_API_KEY:
-                self._send_error_response(500, "AI service not configured")
+                print(f"❌ No API key configured")
+                self._send_error_response(500, "AI service not configured - no API key")
                 return
             
             # 获取或创建会话
@@ -325,11 +424,12 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
             }
             session_data["messages"].append(user_message)
             
-            # 调用AI服务（必须成功，不再有Basic Mode后备）
+            # 调用AI服务（增强诊断）
             try:
-                # 使用更稳定的线程池执行方式
+                print(f"🤖 Starting AI call...")
+                
+                # 使用线程池执行方式
                 import concurrent.futures
-                import threading
                 
                 def run_ai_call():
                     """在新线程中运行AI调用"""
@@ -337,24 +437,37 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
                     asyncio.set_event_loop(loop)
                     try:
                         return loop.run_until_complete(call_ai_service(message, session_data))
+                    except Exception as e:
+                        print(f"❌ Thread AI call error: {e}")
+                        raise e
                     finally:
                         loop.close()
                 
-                # 使用线程执行AI调用，增加超时时间
+                # 使用线程执行AI调用
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(run_ai_call)
                     ai_response = future.result(timeout=90)  # 90秒超时
                 
-                status = "success"
-                print(f"✅ AI response generated successfully")
+                print(f"✅ AI response generated successfully: {len(ai_response)} chars")
                 
             except concurrent.futures.TimeoutError:
-                print(f"❌ AI service timeout")
+                print(f"❌ AI service timeout after 90 seconds")
                 self._send_error_response(504, "AI service timeout - please try again")
                 return
             except Exception as e:
-                print(f"❌ AI service failed: {e}")
-                self._send_error_response(503, f"AI service unavailable: {str(e)}")
+                print(f"❌ AI service failed with error: {str(e)}")
+                print(f"❌ Error type: {type(e).__name__}")
+                
+                # 提供更详细的错误信息
+                error_msg = f"AI service error: {str(e)}"
+                if "401" in str(e) or "403" in str(e):
+                    error_msg = "API authentication failed - please check API key"
+                elif "429" in str(e):
+                    error_msg = "Rate limit exceeded - please try again later"
+                elif "timeout" in str(e).lower():
+                    error_msg = "AI service timeout - please try again"
+                
+                self._send_error_response(503, error_msg)
                 return
             
             # 添加AI回复到会话
@@ -375,17 +488,19 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
             response = {
                 "reply": ai_response,
                 "session_id": session_id,
-                "status": status,
+                "status": "success",
                 "timestamp": time.time(),
                 "customer_info_updated": bool(customer_info),
                 "recommendations": recommendations if recommendations else None
             }
             
+            print(f"✅ Chat response sent successfully")
             self._send_json_response(200, response)
             
         except Exception as e:
-            print(f"❌ Chat error: {e}")
-            self._send_error_response(500, "Internal server error")
+            print(f"❌ Chat handler error: {e}")
+            print(f"❌ Error type: {type(e).__name__}")
+            self._send_error_response(500, f"Internal server error: {str(e)}")
     
     def _handle_session_status(self, session_id):
         """处理会话状态查询"""
@@ -420,7 +535,7 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
         response = {
             "error": "Endpoint not found",
             "path": self.path,
-            "available_endpoints": ["/", "/health", "/chat", "/session-status/{id}", "/reset-session"]
+            "available_endpoints": ["/", "/health", "/test-ai", "/chat", "/session-status/{id}", "/reset-session"]
         }
         self._send_json_response(404, response)
     
@@ -437,6 +552,7 @@ def run_server():
         print(f"🚀 Server starting on port {PORT}")
         print(f"🔗 Health check: http://localhost:{PORT}/health")
         print(f"💬 Chat endpoint: http://localhost:{PORT}/chat")
+        print(f"🧪 AI test: http://localhost:{PORT}/test-ai")
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n🛑 Server shutting down...")
