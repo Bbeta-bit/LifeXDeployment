@@ -886,7 +886,7 @@ class UnifiedIntelligentService:
         return message
 
     # 同时需要修复全局匹配函数中的调用
-    async def _global_product_matching_fixed(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
+    async def _global_product_matching(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
         """修复后的全局产品匹配"""
         
         print(f"🌍 Starting GLOBAL product matching across all lenders...")
