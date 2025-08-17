@@ -1,22 +1,8 @@
-# requirements.txt - 完全优化版本
-# 核心框架
-fastapi==0.103.2
-uvicorn==0.23.2
 
-# HTTP客户端（AI API调用）
+# requirements.txt - 绝对最小化版本（避免Rust编译）
+fastapi==0.95.2
+uvicorn==0.22.0
 httpx==0.24.1
-
-# 环境变量管理
 python-dotenv==1.0.0
-
-# 数据验证
-pydantic==2.4.2
-
-# 文件上传支持
 python-multipart==0.0.6
-
-# 类型提示支持
-typing-extensions==4.8.0
-
-# 日志增强（可选但推荐）
-structlog==23.2.0
+pydantic==1.10.12
