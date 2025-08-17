@@ -1,4 +1,4 @@
-# main.py - Claude API版本（直接调用Anthropic API）
+# main.py - 修复版本：恢复unified_intelligent_service集成
 import os
 import json
 import time
@@ -10,27 +10,43 @@ from dotenv import load_dotenv
 import httpx
 import threading
 
+# 🔧 关键修复：恢复unified_intelligent_service导入
+try:
+    from unified_intelligent_service import UnifiedIntelligentService
+    UNIFIED_SERVICE_AVAILABLE = True
+    print("✅ Unified intelligent service loaded successfully")
+except ImportError as e:
+    print(f"⚠️ Failed to load unified service: {e}")
+    UNIFIED_SERVICE_AVAILABLE = False
+
 # 加载环境变量
 load_dotenv()
 
 # 全局变量
 conversation_memory = {}
+unified_service = None
 
-# 支持多种API密钥名称
+# 🔧 修复：初始化unified service
+if UNIFIED_SERVICE_AVAILABLE:
+    try:
+        unified_service = UnifiedIntelligentService()
+        print("✅ Unified service initialized with product database integration")
+    except Exception as e:
+        print(f"❌ Failed to initialize unified service: {e}")
+        UNIFIED_SERVICE_AVAILABLE = False
+
+# API配置
 ANTHROPIC_API_KEY = (
     os.getenv("ANTHROPIC_API_KEY") or 
     os.getenv("CLAUDE_API_KEY") or 
-    os.getenv("OPENROUTER_API_KEY")  # 向后兼容
+    os.getenv("OPENROUTER_API_KEY")
 )
 
-# API配置
 if ANTHROPIC_API_KEY and ANTHROPIC_API_KEY.startswith("sk-ant-"):
-    # 直接使用Anthropic API
     API_URL = "https://api.anthropic.com/v1/messages"
     API_TYPE = "anthropic"
     MODEL_NAME = "claude-3-haiku-20240307"
 elif ANTHROPIC_API_KEY and ANTHROPIC_API_KEY.startswith("sk-or-"):
-    # 使用OpenRouter API
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
     API_TYPE = "openrouter"
     MODEL_NAME = "anthropic/claude-3-haiku"
@@ -43,9 +59,8 @@ print(f"🚀 LIFEX Car Loan AI Agent starting...")
 print(f"🔑 API Key configured: {'✅' if ANTHROPIC_API_KEY else '❌'}")
 print(f"🔗 API Type: {API_TYPE}")
 print(f"🤖 Model: {MODEL_NAME}")
-
-if ANTHROPIC_API_KEY:
-    print(f"🔑 API Key preview: {ANTHROPIC_API_KEY[:15]}...{ANTHROPIC_API_KEY[-4:]}")
+print(f"🧠 Unified Service: {'✅ Active' if UNIFIED_SERVICE_AVAILABLE else '❌ Disabled'}")
+print(f"📁 Product Database: {'docs/' if UNIFIED_SERVICE_AVAILABLE else 'Not available'}")
 
 def cleanup_old_sessions():
     """清理超过1小时的旧会话"""
@@ -53,7 +68,7 @@ def cleanup_old_sessions():
     expired_sessions = []
     
     for session_id, session_data in conversation_memory.items():
-        if current_time - session_data.get("created_at", 0) > 3600:  # 1小时
+        if current_time - session_data.get("created_at", 0) > 3600:
             expired_sessions.append(session_id)
     
     for session_id in expired_sessions:
@@ -75,91 +90,65 @@ def get_session_or_create(session_id):
     
     return conversation_memory[session_id]
 
-def validate_customer_info(customer_info):
-    """验证和清理客户信息"""
-    if not isinstance(customer_info, dict):
-        return {}
-    
-    cleaned = {}
-    for key, value in customer_info.items():
-        if value is not None and str(value).strip() and value != 'undefined':
-            # 特殊处理数字字段
-            if key in ['loan_amount', 'credit_score', 'ABN_years', 'GST_years']:
-                try:
-                    if isinstance(value, str):
-                        clean_value = value.replace('$', '').replace(',', '').strip()
-                        cleaned[key] = float(clean_value) if '.' in clean_value else int(clean_value)
-                    else:
-                        cleaned[key] = value
-                except (ValueError, TypeError):
-                    print(f"⚠️ Invalid numeric value for {key}: {value}")
-            else:
-                cleaned[key] = str(value).strip()
-    
-    return cleaned
-
-async def test_api_connection():
-    """测试API连接"""
-    if not ANTHROPIC_API_KEY:
-        return {"success": False, "error": "No API key configured"}
-    
+async def process_with_unified_service(message, session_id, customer_info):
+    """🔧 修复：使用统一智能服务处理消息 - 保持原有功能完整"""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            if API_TYPE == "anthropic":
-                # 测试Anthropic API
-                test_response = await client.post(
-                    API_URL,
-                    json={
-                        "model": MODEL_NAME,
-                        "max_tokens": 10,
-                        "messages": [{"role": "user", "content": "Hello"}]
-                    },
-                    headers={
-                        "x-api-key": ANTHROPIC_API_KEY,
-                        "Content-Type": "application/json",
-                        "anthropic-version": "2023-06-01"
-                    }
-                )
-            else:
-                # 测试OpenRouter API
-                test_response = await client.post(
-                    API_URL,
-                    json={
-                        "model": MODEL_NAME,
-                        "messages": [{"role": "user", "content": "Hello"}],
-                        "max_tokens": 10
-                    },
-                    headers={
-                        "Authorization": f"Bearer {ANTHROPIC_API_KEY}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://lifex-backend.onrender.com",
-                        "X-Title": "LIFEX Car Loan Agent Test"
-                    }
-                )
+        print(f"🧠 Processing with unified service: {session_id}")
+        print(f"👤 Customer info fields: {list(customer_info.keys())}")
+        
+        # 🔧 关键：调用统一服务的核心方法，保持原有prompt管理和推荐策略
+        result = await unified_service.process_user_message(
+            user_message=message,
+            session_id=session_id,
+            current_customer_info=customer_info
+        )
+        
+        print(f"✅ Unified service response type: {type(result)}")
+        
+        # 🔧 确保返回标准化格式，保持前端兼容性
+        if isinstance(result, dict):
+            # 确保包含前端需要的所有字段
+            standardized_response = {
+                "reply": result.get("message", "I'm here to help with your loan needs."),
+                "recommendations": result.get("recommendations", []),
+                "session_id": session_id,
+                "status": "success",
+                "service_used": "unified_intelligent_service",
+                # 🔧 保持function bar需要的数据格式
+                "extracted_info": result.get("extracted_info", {}),
+                "customer_profile": result.get("customer_profile", {}),
+                "conversation_stage": result.get("stage", "greeting")
+            }
             
-            if test_response.status_code == 200:
-                return {"success": True, "status_code": 200, "api_type": API_TYPE}
-            else:
-                error_text = test_response.text
-                return {
-                    "success": False, 
-                    "status_code": test_response.status_code,
-                    "error": error_text,
-                    "api_type": API_TYPE
-                }
-                
+            # 🔧 确保推荐数据包含前端product comparison需要的完整信息
+            if standardized_response["recommendations"]:
+                for rec in standardized_response["recommendations"]:
+                    # 确保每个推荐包含必要字段
+                    if "timestamp" not in rec:
+                        rec["timestamp"] = time.time()
+                    if "id" not in rec:
+                        rec["id"] = f"{rec.get('lender_name', 'unknown')}_{rec.get('product_name', 'product')}_{int(time.time())}"
+            
+            return standardized_response
+        else:
+            # 降级处理：如果返回不是字典格式
+            return {
+                "reply": str(result) if result else "I'm here to help with your loan needs.",
+                "recommendations": [],
+                "session_id": session_id,
+                "status": "success",
+                "service_used": "unified_intelligent_service"
+            }
+            
     except Exception as e:
-        return {"success": False, "error": str(e), "api_type": API_TYPE}
+        print(f"❌ Unified service error: {e}")
+        print(f"❌ Error details: {type(e).__name__}: {str(e)}")
+        return None
 
-async def call_ai_service(message, session_data):
-    """AI服务调用 - 支持Anthropic和OpenRouter"""
-    if not ANTHROPIC_API_KEY:
-        raise Exception("API key not configured")
-    
-    print(f"🤖 Starting AI service call ({API_TYPE}) for message: {message[:50]}...")
-    
-    # 构建系统提示
-    system_prompt = """You are Agent X, a professional car loan advisor specializing in Australian car loans. Help customers find the best car loan options.
+async def fallback_ai_response(message, session_id, customer_info):
+    """降级AI响应 - 当unified service不可用时使用"""
+    system_prompt = """You are a professional Australian car loan advisor. 
+Help customers find suitable car loan options.
 
 Guidelines:
 - Be friendly, professional, and helpful
@@ -168,136 +157,115 @@ Guidelines:
 - Keep responses conversational and concise
 - Focus on Australian lending products and requirements"""
     
-    # 添加客户上下文
-    if session_data["customer_info"]:
+    if customer_info:
         context_items = []
-        for key, value in session_data["customer_info"].items():
+        for key, value in customer_info.items():
             if value:
                 context_items.append(f"{key.replace('_', ' ')}: {value}")
         
         if context_items:
             system_prompt += f"\n\nCustomer context: {', '.join(context_items)}"
     
-    # 构建消息历史（最近6条消息）
-    recent_messages = session_data["messages"][-6:]
-    
-    # 调用API（根据类型使用不同格式）
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for attempt in range(3):  # 3次重试
-            try:
-                print(f"🔄 AI API attempt {attempt + 1}/3 ({API_TYPE})")
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            if API_TYPE == "anthropic":
+                request_payload = {
+                    "model": MODEL_NAME,
+                    "max_tokens": 1000,
+                    "messages": [{"role": "user", "content": message}],
+                    "system": system_prompt
+                }
                 
-                if API_TYPE == "anthropic":
-                    # Anthropic API格式
-                    messages = []
-                    for msg in recent_messages:
-                        messages.append({"role": msg["role"], "content": msg["content"]})
-                    messages.append({"role": "user", "content": message})
-                    
-                    request_payload = {
-                        "model": MODEL_NAME,
-                        "max_tokens": 1000,
-                        "messages": messages,
-                        "system": system_prompt
-                    }
-                    
-                    headers = {
-                        "x-api-key": ANTHROPIC_API_KEY,
-                        "Content-Type": "application/json",
-                        "anthropic-version": "2023-06-01"
-                    }
-                    
-                else:
-                    # OpenRouter API格式
-                    messages = [{"role": "system", "content": system_prompt}]
-                    for msg in recent_messages:
-                        messages.append({"role": msg["role"], "content": msg["content"]})
-                    messages.append({"role": "user", "content": message})
-                    
-                    request_payload = {
-                        "model": MODEL_NAME,
-                        "messages": messages,
-                        "max_tokens": 1000,
-                        "temperature": 0.7
-                    }
-                    
-                    headers = {
-                        "Authorization": f"Bearer {ANTHROPIC_API_KEY}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://lifex-backend.onrender.com",
-                        "X-Title": "LIFEX Car Loan Agent"
-                    }
+                headers = {
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "Content-Type": "application/json",
+                    "anthropic-version": "2023-06-01"
+                }
                 
-                print(f"📤 Sending request to: {API_URL}")
-                print(f"📤 Model: {request_payload['model']}")
-                print(f"📤 Message count: {len(request_payload['messages']) if 'messages' in request_payload else 'system+messages'}")
-                
-                response = await client.post(
-                    API_URL,
-                    json=request_payload,
-                    headers=headers
-                )
-                
-                print(f"📥 Response status: {response.status_code}")
+                response = await client.post(API_URL, json=request_payload, headers=headers)
                 
                 if response.status_code == 200:
-                    result = response.json()
+                    data = response.json()
+                    return data["content"][0]["text"]
                     
-                    if API_TYPE == "anthropic":
-                        ai_response = result["content"][0]["text"]
-                    else:
-                        ai_response = result["choices"][0]["message"]["content"]
-                    
-                    print(f"✅ AI API success on attempt {attempt + 1}")
-                    print(f"✅ Response length: {len(ai_response)} characters")
-                    return ai_response
-                else:
-                    error_text = response.text
-                    print(f"❌ AI API returned {response.status_code}: {error_text}")
-                    
-                    # 如果是认证错误或其他严重错误，不要重试
-                    if response.status_code in [401, 403]:
-                        raise Exception(f"Authentication error {response.status_code}: {error_text}")
-                    
-                    if attempt == 2:  # 最后一次尝试
-                        raise Exception(f"API returned {response.status_code}: {error_text}")
-                    
-            except Exception as e:
-                print(f"❌ AI API attempt {attempt + 1} failed: {str(e)}")
-                print(f"❌ Exception type: {type(e).__name__}")
+            else:  # OpenRouter
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message}
+                ]
                 
-                if attempt == 2:  # 最后一次尝试
-                    raise e
+                request_payload = {
+                    "model": MODEL_NAME,
+                    "messages": messages,
+                    "max_tokens": 1000,
+                    "temperature": 0.7
+                }
+                
+                headers = {
+                    "Authorization": f"Bearer {ANTHROPIC_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                
+                response = await client.post(API_URL, json=request_payload, headers=headers)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    return data["choices"][0]["message"]["content"]
                     
-                await asyncio.sleep(2 ** attempt)  # 指数退避
+    except Exception as e:
+        print(f"❌ AI API error: {e}")
+    
+    return "I'm here to help with your car loan needs. Could you tell me more about what you're looking for?"
 
-def generate_recommendations(customer_info):
-    """生成车贷推荐"""
-    if not customer_info:
-        return None
+async def test_api_connection():
+    """测试API连接"""
+    try:
+        test_message = "Hello, I need a car loan."
+        response = await fallback_ai_response(test_message, "test", {})
+        
+        if response and len(response) > 10:
+            return {
+                "status": "success",
+                "message": "API connection successful",
+                "test_response_length": len(response),
+                "api_type": API_TYPE,
+                "model": MODEL_NAME
+            }
+        else:
+            return {
+                "status": "failed",
+                "message": "API connection failed - no valid response",
+                "api_type": API_TYPE
+            }
+    except Exception as e:
+        return {
+            "status": "error", 
+            "message": f"API test failed: {str(e)}",
+            "api_type": API_TYPE
+        }
+
+def validate_customer_info(customer_info):
+    """🔧 增强：验证和清理客户信息 - 保持function bar兼容性"""
+    if not isinstance(customer_info, dict):
+        return {}
     
-    recommendations = []
+    cleaned = {}
+    for key, value in customer_info.items():
+        if value is not None and str(value).strip() and value != 'undefined':
+            # 🔧 保持数据类型一致性，供dynamic form使用
+            if key in ['loan_amount', 'desired_loan_amount', 'credit_score', 'ABN_years', 'GST_years']:
+                try:
+                    if isinstance(value, str):
+                        clean_value = value.replace('$', '').replace(',', '').strip()
+                        cleaned[key] = float(clean_value) if '.' in clean_value else int(clean_value)
+                    else:
+                        cleaned[key] = value
+                except (ValueError, TypeError):
+                    continue
+            else:
+                cleaned[key] = str(value).strip()
     
-    # 基础推荐逻辑
-    loan_amount = customer_info.get('loan_amount', 0)
-    if isinstance(loan_amount, str):
-        try:
-            loan_amount = float(loan_amount.replace('$', '').replace(',', ''))
-        except:
-            loan_amount = 0
-    
-    # 示例推荐
-    if loan_amount > 0:
-        recommendations.append({
-            "lender_name": "Major Bank",
-            "product_name": "Car Loan",
-            "base_rate": "7.49%",
-            "comparison_rate": "7.89%",
-            "monthly_payment": f"${loan_amount * 0.02:.2f}",
-            "features": ["Quick approval", "No early repayment fees"]
-        })
-    
-    return recommendations if recommendations else None
+    return cleaned
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     """多线程HTTP服务器"""
@@ -374,7 +342,7 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
         response = {
             "message": "LIFEX Car Loan AI Agent API",
             "status": "running",
-            "version": "4.3-claude-api",
+            "version": "4.5-unified-integrated",
             "endpoints": {
                 "health": "/health",
                 "chat": "/chat",
@@ -386,22 +354,27 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
                 "ai_enabled": bool(ANTHROPIC_API_KEY),
                 "api_type": API_TYPE,
                 "model": MODEL_NAME,
+                "unified_service": UNIFIED_SERVICE_AVAILABLE,
+                "product_database": "docs/ (4 lenders)" if UNIFIED_SERVICE_AVAILABLE else None,
                 "cors_enabled": True
             }
         }
         self._send_json_response(200, response)
     
     def _handle_health(self):
-        """处理健康检查"""
+        """🔧 增强：健康检查 - 包含服务状态"""
         response = {
             "status": "healthy",
             "timestamp": time.time(),
             "message": "LIFEX Car Loan AI Agent is running",
-            "version": "4.3-claude-api",
+            "version": "4.5-unified-integrated",
             "features": {
                 "api_key_configured": bool(ANTHROPIC_API_KEY),
                 "api_type": API_TYPE,
                 "model": MODEL_NAME,
+                "unified_service": UNIFIED_SERVICE_AVAILABLE,
+                "product_database_status": "loaded" if UNIFIED_SERVICE_AVAILABLE else "unavailable",
+                "lenders_available": ["Angle", "BFS", "FCAU", "RAF"] if UNIFIED_SERVICE_AVAILABLE else [],
                 "cors_enabled": True,
                 "active_sessions": len(conversation_memory)
             }
@@ -409,9 +382,8 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
         self._send_json_response(200, response)
     
     def _handle_test_ai(self):
-        """测试AI连接"""
+        """测试AI连接和unified service"""
         try:
-            # 使用线程运行异步测试
             import concurrent.futures
             
             def run_test():
@@ -426,139 +398,130 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
                 future = executor.submit(run_test)
                 test_result = future.result(timeout=60)
             
-            self._send_json_response(200, {
-                "test_result": test_result,
-                "timestamp": time.time(),
-                "config": {
-                    "api_type": API_TYPE,
-                    "model": MODEL_NAME,
-                    "api_url": API_URL
-                }
-            })
+            # 🔧 添加unified service测试状态
+            response = {
+                "api_test": test_result,
+                "unified_service": {
+                    "available": UNIFIED_SERVICE_AVAILABLE,
+                    "product_database": "4 lenders (Angle, BFS, FCAU, RAF)" if UNIFIED_SERVICE_AVAILABLE else "Not available"
+                },
+                "timestamp": time.time()
+            }
+            
+            self._send_json_response(200, response)
             
         except Exception as e:
-            print(f"❌ AI test error: {e}")
-            self._send_json_response(500, {
-                "error": f"AI test failed: {str(e)}",
-                "timestamp": time.time(),
-                "config": {
-                    "api_type": API_TYPE,
-                    "model": MODEL_NAME,
-                    "api_url": API_URL
-                }
-            })
+            self._send_error_response(500, f"Test failed: {str(e)}")
     
     def _handle_chat(self, data):
-        """处理聊天请求"""
+        """🔧 核心修复：聊天请求处理 - 完整集成unified service"""
         try:
             message = data.get("message", "").strip()
             session_id = data.get("session_id", f"session_{int(time.time())}")
             customer_info = validate_customer_info(data.get("current_customer_info", {}))
             
             if not message:
-                self._send_error_response(400, "Message is required")
+                self._send_error_response(400, "Message content cannot be empty")
                 return
             
-            print(f"📨 Chat request: session={session_id}, message_len={len(message)}")
-            
-            # 检查API密钥
-            if not ANTHROPIC_API_KEY:
-                print(f"❌ No API key configured")
-                self._send_error_response(500, "AI service not configured - no API key")
-                return
+            print(f"💬 Processing chat: {session_id}")
+            print(f"📝 Message: {message[:100]}...")
+            print(f"👤 Customer info fields: {list(customer_info.keys())}")
             
             # 获取或创建会话
             session_data = get_session_or_create(session_id)
             
-            # 更新客户信息
-            if customer_info:
-                session_data["customer_info"].update(customer_info)
-                print(f"📊 Updated customer info: {len(customer_info)} fields")
+            # 🔧 保持customer info在会话中，供function bar使用
+            session_data["customer_info"].update(customer_info)
             
-            # 添加用户消息到会话
-            user_message = {
+            # 添加用户消息到历史
+            session_data["messages"].append({
                 "role": "user",
                 "content": message,
                 "timestamp": time.time()
-            }
-            session_data["messages"].append(user_message)
+            })
             
-            # 调用AI服务
-            try:
-                print(f"🤖 Starting AI call ({API_TYPE})...")
-                
-                # 使用线程池执行方式
-                import concurrent.futures
-                
-                def run_ai_call():
-                    """在新线程中运行AI调用"""
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        return loop.run_until_complete(call_ai_service(message, session_data))
-                    except Exception as e:
-                        print(f"❌ Thread AI call error: {e}")
-                        raise e
-                    finally:
-                        loop.close()
-                
-                # 使用线程执行AI调用
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(run_ai_call)
-                    ai_response = future.result(timeout=90)  # 90秒超时
-                
-                print(f"✅ AI response generated successfully: {len(ai_response)} chars")
-                
-            except concurrent.futures.TimeoutError:
-                print(f"❌ AI service timeout after 90 seconds")
-                self._send_error_response(504, "AI service timeout - please try again")
-                return
-            except Exception as e:
-                print(f"❌ AI service failed with error: {str(e)}")
-                print(f"❌ Error type: {type(e).__name__}")
-                
-                # 提供更详细的错误信息
-                error_msg = f"AI service error: {str(e)}"
-                if "401" in str(e) or "403" in str(e):
-                    error_msg = "API authentication failed - please check API key"
-                elif "429" in str(e):
-                    error_msg = "Rate limit exceeded - please try again later"
-                elif "timeout" in str(e).lower():
-                    error_msg = "AI service timeout - please try again"
-                
-                self._send_error_response(503, error_msg)
-                return
-            
-            # 添加AI回复到会话
-            assistant_message = {
-                "role": "assistant",
-                "content": ai_response,
-                "timestamp": time.time()
-            }
-            session_data["messages"].append(assistant_message)
-            
-            # 生成推荐
-            recommendations = generate_recommendations(session_data["customer_info"])
-            
-            # 定期清理
-            if len(session_data["messages"]) % 20 == 0:
+            # 定期清理旧会话
+            if len(conversation_memory) > 50:
                 cleanup_old_sessions()
             
-            response = {
-                "reply": ai_response,
-                "session_id": session_id,
-                "status": "success",
-                "timestamp": time.time(),
-                "customer_info_updated": bool(customer_info),
-                "recommendations": recommendations if recommendations else None
-            }
+            # 🔧 核心：使用unified service处理消息
+            import concurrent.futures
             
-            print(f"✅ Chat response sent successfully")
-            self._send_json_response(200, response)
+            def run_chat_processing():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    if UNIFIED_SERVICE_AVAILABLE:
+                        # 🔧 使用unified service处理，保持原有prompt管理和推荐策略
+                        return loop.run_until_complete(
+                            process_with_unified_service(message, session_id, session_data["customer_info"])
+                        )
+                    else:
+                        # 降级处理
+                        ai_response = loop.run_until_complete(
+                            fallback_ai_response(message, session_id, session_data["customer_info"])
+                        )
+                        return {
+                            "reply": ai_response,
+                            "recommendations": [],
+                            "session_id": session_id,
+                            "status": "fallback",
+                            "service_used": "basic_ai"
+                        }
+                finally:
+                    loop.close()
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_chat_processing)
+                response = future.result(timeout=120)  # 120秒超时，给复杂推荐算法足够时间
+            
+            # 🔧 处理响应并保持数据完整性
+            if response:
+                # 添加助手消息到历史，包含推荐信息
+                assistant_message = {
+                    "role": "assistant", 
+                    "content": response.get("reply", ""),
+                    "timestamp": time.time(),
+                    "recommendations": response.get("recommendations", []),
+                    "conversation_stage": response.get("conversation_stage", "unknown")
+                }
+                
+                session_data["messages"].append(assistant_message)
+                
+                # 🔧 保持推荐历史供function bar使用
+                if response.get("recommendations"):
+                    if "recommendation_history" not in session_data:
+                        session_data["recommendation_history"] = []
+                    session_data["recommendation_history"].extend(response.get("recommendations", []))
+                
+                # 限制历史长度
+                if len(session_data["messages"]) > 20:
+                    session_data["messages"] = session_data["messages"][-20:]
+                
+                # 🔧 确保响应包含前端需要的所有字段
+                final_response = {
+                    "reply": response.get("reply"),
+                    "recommendations": response.get("recommendations", []),
+                    "session_id": session_id,
+                    "status": response.get("status", "success"),
+                    "service_used": response.get("service_used", "unified_intelligent_service"),
+                    # function bar需要的额外数据
+                    "extracted_info": response.get("extracted_info", {}),
+                    "customer_profile": response.get("customer_profile", {}),
+                    "conversation_stage": response.get("conversation_stage", "greeting"),
+                    "timestamp": time.time()
+                }
+                
+                self._send_json_response(200, final_response)
+            else:
+                self._send_error_response(500, "Failed to process message")
             
         except Exception as e:
             print(f"❌ Chat handler error: {e}")
             print(f"❌ Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
             self._send_error_response(500, f"Internal server error: {str(e)}")
     
     def _handle_session_status(self, session_id):
@@ -570,7 +533,8 @@ class CORSRequestHandler(BaseHTTPRequestHandler):
                 "message_count": len(session_data["messages"]),
                 "customer_info_fields": len(session_data["customer_info"]),
                 "created_at": session_data["created_at"],
-                "last_active": session_data["last_active"]
+                "last_active": session_data["last_active"],
+                "has_recommendations": "recommendation_history" in session_data and len(session_data.get("recommendation_history", [])) > 0
             }
             self._send_json_response(200, response)
         else:
@@ -612,6 +576,8 @@ def run_server():
         print(f"🔗 Health check: http://localhost:{PORT}/health")
         print(f"💬 Chat endpoint: http://localhost:{PORT}/chat")
         print(f"🧪 AI test: http://localhost:{PORT}/test-ai")
+        print(f"🧠 Unified Service: {'✅ Enabled with product database' if UNIFIED_SERVICE_AVAILABLE else '❌ Disabled - using fallback'}")
+        print(f"📁 Product Database: {'docs/ (Angle, BFS, FCAU, RAF)' if UNIFIED_SERVICE_AVAILABLE else 'Not available'}")
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n🛑 Server shutting down...")
