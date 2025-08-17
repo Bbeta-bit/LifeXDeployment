@@ -220,7 +220,7 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         throw new Error('Invalid response from server');
       }
 
-      const { reply, status, recommendations } = apiResponse;
+      const { reply, recommendations } = apiResponse;
 
       // 处理推荐
       if (recommendations && Array.isArray(recommendations) && recommendations.length > 0) {
@@ -239,12 +239,11 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
         }
       }
 
-      // 添加机器人回复
+      // 添加机器人回复（移除status相关逻辑）
       const botMessage = {
         sender: 'bot',
         text: reply,
         timestamp: new Date().toISOString(),
-        status,
         responseTime
       };
       setMessages(prev => [...prev, botMessage]);
@@ -271,18 +270,18 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       console.error('❌ Send failed:', error);
 
       // 智能错误处理
-      let errorMessage = "I'm having trouble connecting. Please try again in a moment.";
-      let shouldRetryConnection = false;
+      let errorMessage = "I'm having trouble connecting to our AI service. Please try again in a moment.";
 
       if (error.message.includes('timeout') || error.message.includes('AbortError')) {
-        errorMessage = "Request timed out. The server might be busy. Please try again.";
+        errorMessage = "Request timed out. Please try again.";
       } else if (error.message.includes('HTTP 429')) {
         errorMessage = "Server is currently busy. Please wait a moment and try again.";
-      } else if (error.message.includes('HTTP 500')) {
-        errorMessage = "There's a temporary server issue. Please try again in a few minutes.";
+      } else if (error.message.includes('HTTP 503')) {
+        errorMessage = "AI service is temporarily unavailable. Please try again in a few minutes.";
+      } else if (error.message.includes('HTTP 504')) {
+        errorMessage = "Request timed out. Please try again.";
       } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
         errorMessage = "Network connection issue. Please check your connection.";
-        shouldRetryConnection = true;
       }
 
       // 添加错误消息
@@ -295,47 +294,28 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       setMessages(prev => [...prev, errorBotMessage]);
 
       // 更新连接状态
-      if (shouldRetryConnection) {
-        setConnectionState(prev => ({
-          ...prev,
-          isConnected: false
-        }));
-        scheduleRetry();
-      }
-
-      // 通知父组件错误
-      if (onError) {
-        onError(error);
-      }
+      setConnectionState(prev => ({
+        ...prev,
+        isConnected: false,
+        retryCount: prev.retryCount + 1
+      }));
 
     } finally {
       setIsLoading(false);
     }
-  }, [
-    input, 
-    isLoading, 
-    sessionId, 
-    conversationHistory, 
-    customerInfo, 
-    onNewMessage, 
-    onRecommendationUpdate, 
-    onError, 
-    connectionState.isConnected,
-    scheduleRetry
-  ]);
+  }, [input, isLoading, sessionId, conversationHistory, customerInfo, onNewMessage, onRecommendationUpdate, connectionState.isConnected]);
 
-  // 自动滚动
-  useEffect(() => {
-    if (chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight;
-    }
-  }, [messages]);
+  // 手动重连
+  const handleReconnect = useCallback(() => {
+    console.log('🔄 Manual reconnection triggered');
+    setConnectionState(prev => ({ ...prev, retryCount: 0 }));
+    initializeConnection();
+  }, [initializeConnection]);
 
-  // 输入处理
+  // 处理输入
   const handleInputChange = useCallback((e) => {
     setInput(e.target.value);
-    
-    // 自动调整文本域高度
+    // 自动调整文本框高度
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
@@ -349,30 +329,29 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
     }
   }, [handleSend]);
 
-  // 手动重连
-  const handleReconnect = useCallback(() => {
-    setConnectionState(prev => ({ ...prev, retryCount: 0 }));
-    initializeConnection();
-  }, [initializeConnection]);
+  // 自动滚动
+  useEffect(() => {
+    if (chatRef.current) {
+      chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    }
+  }, [messages]);
 
   // 连接状态指示器
   const connectionIndicator = useMemo(() => {
-    const { isConnected, isChecking } = connectionState;
-    
-    if (isChecking) {
+    if (connectionState.isChecking) {
       return { color: 'bg-yellow-500', text: 'Connecting...' };
-    } else if (isConnected) {
+    } else if (connectionState.isConnected) {
       return { color: 'bg-green-500', text: 'Connected' };
     } else {
       return { color: 'bg-red-500', text: 'Disconnected' };
     }
   }, [connectionState]);
 
-  // 消息渲染优化
-  const renderMessage = useCallback((message, index) => (
+  // 消息渲染组件（移除Basic Mode状态显示）
+  const MessageComponent = useCallback(({ message }) => (
     <div
-      key={`${message.timestamp}-${index}`}
-      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+      className={`flex mb-4 ${
+        message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
     >
       <div
         className={`px-5 py-3 rounded-2xl max-w-[75%] whitespace-pre-wrap text-base ${
@@ -385,11 +364,10 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       >
         {message.text}
         
-        {/* 状态指示器 */}
-        {message.status && message.status !== 'success' && (
+        {/* 仅显示错误状态 */}
+        {message.isError && (
           <div className="text-xs mt-1 opacity-60">
-            {message.status === 'basic_mode' && '(Basic Mode)'}
-            {message.status === 'fallback' && '(Limited Service)'}
+            (Error)
           </div>
         )}
         
@@ -402,6 +380,10 @@ const Chatbot = ({ onNewMessage, conversationHistory, customerInfo, onRecommenda
       </div>
     </div>
   ), []);
+
+  const renderMessage = useCallback((message, index) => (
+    <MessageComponent key={`${message.timestamp}-${index}`} message={message} />
+  ), [MessageComponent]);
 
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: '#fef7e8' }}>

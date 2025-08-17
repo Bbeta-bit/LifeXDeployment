@@ -1,4 +1,4 @@
-# main.py - 纯HTTP服务器版本（完全避免FastAPI/Pydantic）
+# main.py - 修复版本（移除Basic Mode，确保AI服务正常）
 import os
 import json
 import time
@@ -74,14 +74,18 @@ def validate_customer_info(customer_info):
 
 async def call_ai_service(message, session_data):
     """AI服务调用"""
+    if not OPENROUTER_API_KEY:
+        raise Exception("OpenRouter API key not configured")
+    
     # 构建系统提示
-    system_prompt = """You are Agent X, a professional car loan advisor. Help customers find the best car loan options.
+    system_prompt = """You are Agent X, a professional car loan advisor specializing in Australian car loans. Help customers find the best car loan options.
 
 Guidelines:
 - Be friendly, professional, and helpful
 - Ask relevant questions to understand their needs
 - Provide practical car loan advice
-- Keep responses conversational and concise"""
+- Keep responses conversational and concise
+- Focus on Australian lending products and requirements"""
     
     # 添加客户上下文
     if session_data["customer_info"]:
@@ -103,124 +107,114 @@ Guidelines:
     # 当前消息
     messages.append({"role": "user", "content": message})
     
-    # 调用API
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        for attempt in range(2):
+    # 调用API（增强重试逻辑）
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for attempt in range(3):  # 增加到3次重试
             try:
+                print(f"🔄 AI API attempt {attempt + 1}/3")
+                
                 response = await client.post(
                     OPENROUTER_API_URL,
                     json={
                         "model": "anthropic/claude-3-haiku",
                         "messages": messages,
-                        "max_tokens": 800,
+                        "max_tokens": 1000,
                         "temperature": 0.7
                     },
                     headers={
                         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://lifex-backend.onrender.com",
+                        "X-Title": "LIFEX Car Loan Agent"
                     }
                 )
                 
                 if response.status_code == 200:
                     result = response.json()
-                    return result["choices"][0]["message"]["content"]
+                    ai_response = result["choices"][0]["message"]["content"]
+                    print(f"✅ AI API success on attempt {attempt + 1}")
+                    return ai_response
                 else:
-                    print(f"⚠️ AI API returned {response.status_code}, attempt {attempt + 1}")
-                    if attempt == 1:
-                        raise Exception(f"API returned {response.status_code}")
+                    error_text = await response.aread() if hasattr(response, 'aread') else response.text
+                    print(f"⚠️ AI API returned {response.status_code}: {error_text}")
+                    if attempt == 2:  # 最后一次尝试
+                        raise Exception(f"API returned {response.status_code}: {error_text}")
                     
             except Exception as e:
                 print(f"⚠️ AI API attempt {attempt + 1} failed: {e}")
-                if attempt == 1:
+                if attempt == 2:  # 最后一次尝试
                     raise e
-                await asyncio.sleep(1)
+                await asyncio.sleep(2 ** attempt)  # 指数退避
 
-def generate_basic_response(message, customer_info):
-    """生成基础响应"""
-    message_lower = message.lower()
+def run_async_in_thread(coro):
+    """在线程中运行异步函数"""
+    def run_in_thread():
+        try:
+            # 创建新的事件循环
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
     
-    if any(word in message_lower for word in ['hello', 'hi', 'hey']):
-        return "Hello! I'm Agent X, your car loan advisor. What kind of vehicle are you looking to finance?"
-    
-    elif any(word in message_lower for word in ['loan', 'finance']):
-        context = ""
-        if customer_info.get('loan_amount'):
-            context = f" I see you're considering a ${customer_info['loan_amount']:,} loan."
-        return f"I'd be happy to help with car loan options!{context} What's your approximate credit score and preferred loan term?"
-    
-    else:
-        return "I'm here to help with car loan questions! What specific aspect interests you?"
+    return run_in_thread
 
 def generate_recommendations(customer_info):
-    """生成推荐"""
-    if not customer_info.get('loan_amount'):
+    """生成车贷推荐"""
+    if not customer_info:
         return None
     
-    try:
-        loan_amount = float(str(customer_info['loan_amount']).replace(',', '').replace('$', ''))
-        if loan_amount < 5000:
-            return None
-        
-        credit_score = customer_info.get('credit_score', 700)
-        if isinstance(credit_score, str):
-            credit_score = 700
-        
-        # 基于信用分数确定利率
-        if credit_score >= 750:
-            rates = [4.2, 4.8, 5.1]
-        elif credit_score >= 650:
-            rates = [6.5, 7.2, 7.8]
-        else:
-            rates = [9.5, 10.2, 11.1]
-        
-        recommendations = []
-        lenders = [
-            ("Credit Union Plus", "Auto Loan Premium"),
-            ("National Bank", "Vehicle Finance Pro"),
-            ("Community Bank", "Car Loan Standard")
-        ]
-        
-        for i, (lender, product) in enumerate(lenders):
-            term_months = int(customer_info.get('loan_term', 60))
-            rate = rates[i]
-            
-            # 计算月供
-            monthly_rate = rate / 100 / 12
-            monthly_payment = (loan_amount * monthly_rate) / (1 - (1 + monthly_rate) ** (-term_months))
-            
-            recommendations.append({
-                "lender_name": lender,
-                "product_name": product,
-                "base_rate": rate,
-                "loan_amount": loan_amount,
-                "term_months": term_months,
-                "monthly_payment": round(monthly_payment, 2),
-                "total_interest": round((monthly_payment * term_months) - loan_amount, 2),
-                "features": ["Online application", "Fast approval"]
-            })
-        
-        return recommendations
-        
-    except (ValueError, TypeError) as e:
-        print(f"⚠️ Error generating recommendations: {e}")
-        return None
+    recommendations = []
+    
+    # 基础推荐逻辑
+    loan_amount = customer_info.get('loan_amount', 0)
+    if isinstance(loan_amount, str):
+        try:
+            loan_amount = float(loan_amount.replace('$', '').replace(',', ''))
+        except:
+            loan_amount = 0
+    
+    # 示例推荐
+    if loan_amount > 0:
+        recommendations.append({
+            "lender_name": "Major Bank",
+            "product_name": "Car Loan",
+            "base_rate": "7.49%",
+            "comparison_rate": "7.89%",
+            "monthly_payment": f"${loan_amount * 0.02:.2f}",
+            "features": ["Quick approval", "No early repayment fees"]
+        })
+    
+    return recommendations if recommendations else None
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
-    """支持多线程的HTTP服务器"""
+    """多线程HTTP服务器"""
     daemon_threads = True
 
-class LIFEXHandler(BaseHTTPRequestHandler):
-    """LIFEX Car Loan AI Agent HTTP请求处理器"""
-    
+class CORSRequestHandler(BaseHTTPRequestHandler):
     def _set_cors_headers(self):
         """设置CORS头"""
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        self.send_header('Access-Control-Max-Age', '3600')
+    
+    def _send_json_response(self, status_code, data):
+        """发送JSON响应"""
+        self.send_response(status_code)
         self.send_header('Content-Type', 'application/json')
+        self._set_cors_headers()
+        self.end_headers()
+        
+        response_json = json.dumps(data, ensure_ascii=False)
+        self.wfile.write(response_json.encode('utf-8'))
+    
+    def _send_error_response(self, status_code, message):
+        """发送错误响应"""
+        self._send_json_response(status_code, {"error": message})
     
     def do_OPTIONS(self):
-        """处理OPTIONS请求（CORS预检）"""
+        """处理预检请求"""
         self.send_response(200)
         self._set_cors_headers()
         self.end_headers()
@@ -230,7 +224,7 @@ class LIFEXHandler(BaseHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         
-        if path == '/':
+        if path == '/' or path == '':
             self._handle_root()
         elif path == '/health':
             self._handle_health()
@@ -245,9 +239,10 @@ class LIFEXHandler(BaseHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length)
+        
         try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
         except (ValueError, TypeError) as e:
             self._send_error_response(400, "Invalid JSON")
@@ -265,7 +260,7 @@ class LIFEXHandler(BaseHTTPRequestHandler):
         response = {
             "message": "LIFEX Car Loan AI Agent API",
             "status": "running",
-            "version": "4.2-http-server",
+            "version": "4.3-fixed",
             "endpoints": {
                 "health": "/health",
                 "chat": "/chat",
@@ -274,7 +269,8 @@ class LIFEXHandler(BaseHTTPRequestHandler):
             },
             "features": {
                 "ai_enabled": bool(OPENROUTER_API_KEY),
-                "cors_enabled": True
+                "cors_enabled": True,
+                "basic_mode_removed": True
             }
         }
         self._send_json_response(200, response)
@@ -285,17 +281,18 @@ class LIFEXHandler(BaseHTTPRequestHandler):
             "status": "healthy",
             "timestamp": time.time(),
             "message": "LIFEX Car Loan AI Agent is running",
-            "version": "4.2-http-server",
+            "version": "4.3-fixed",
             "features": {
                 "api_key_configured": bool(OPENROUTER_API_KEY),
                 "cors_enabled": True,
-                "active_sessions": len(conversation_memory)
+                "active_sessions": len(conversation_memory),
+                "basic_mode_removed": True
             }
         }
         self._send_json_response(200, response)
     
     def _handle_chat(self, data):
-        """处理聊天请求"""
+        """处理聊天请求 - 移除Basic Mode"""
         try:
             message = data.get("message", "").strip()
             session_id = data.get("session_id", f"session_{int(time.time())}")
@@ -306,6 +303,11 @@ class LIFEXHandler(BaseHTTPRequestHandler):
                 return
             
             print(f"📨 Chat request: session={session_id}, message_len={len(message)}")
+            
+            # 检查API密钥
+            if not OPENROUTER_API_KEY:
+                self._send_error_response(500, "AI service not configured")
+                return
             
             # 获取或创建会话
             session_data = get_session_or_create(session_id)
@@ -323,25 +325,37 @@ class LIFEXHandler(BaseHTTPRequestHandler):
             }
             session_data["messages"].append(user_message)
             
-            # 处理AI响应（同步方式）
-            if OPENROUTER_API_KEY:
-                try:
-                    # 使用线程池处理异步AI调用
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(
-                            asyncio.run,
-                            call_ai_service(message, session_data)
-                        )
-                        ai_response = future.result(timeout=50)  # 50秒超时
-                    status = "success"
-                except Exception as e:
-                    print(f"❌ AI service failed: {e}")
-                    ai_response = f"I'm currently experiencing technical difficulties. However, I can help with basic car loan information. What would you like to know?"
-                    status = "fallback"
-            else:
-                ai_response = generate_basic_response(message, session_data["customer_info"])
-                status = "basic_mode"
+            # 调用AI服务（必须成功，不再有Basic Mode后备）
+            try:
+                # 使用更稳定的线程池执行方式
+                import concurrent.futures
+                import threading
+                
+                def run_ai_call():
+                    """在新线程中运行AI调用"""
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        return loop.run_until_complete(call_ai_service(message, session_data))
+                    finally:
+                        loop.close()
+                
+                # 使用线程执行AI调用，增加超时时间
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(run_ai_call)
+                    ai_response = future.result(timeout=90)  # 90秒超时
+                
+                status = "success"
+                print(f"✅ AI response generated successfully")
+                
+            except concurrent.futures.TimeoutError:
+                print(f"❌ AI service timeout")
+                self._send_error_response(504, "AI service timeout - please try again")
+                return
+            except Exception as e:
+                print(f"❌ AI service failed: {e}")
+                self._send_error_response(503, f"AI service unavailable: {str(e)}")
+                return
             
             # 添加AI回复到会话
             assistant_message = {
@@ -406,46 +420,29 @@ class LIFEXHandler(BaseHTTPRequestHandler):
         response = {
             "error": "Endpoint not found",
             "path": self.path,
-            "available_endpoints": ["/", "/health", "/chat", "/session-status", "/reset-session"]
+            "available_endpoints": ["/", "/health", "/chat", "/session-status/{id}", "/reset-session"]
         }
         self._send_json_response(404, response)
     
-    def _send_json_response(self, status_code, data):
-        """发送JSON响应"""
-        self.send_response(status_code)
-        self._set_cors_headers()
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode('utf-8'))
-    
-    def _send_error_response(self, status_code, message):
-        """发送错误响应"""
-        response = {
-            "error": message,
-            "status": "error",
-            "timestamp": time.time()
-        }
-        self._send_json_response(status_code, response)
-    
     def log_message(self, format, *args):
-        """重写日志方法，简化输出"""
-        print(f"📡 {self.address_string()} - {format % args}")
+        """简化日志输出"""
+        print(f"🌐 {self.client_address[0]} - {format % args}")
 
 def run_server():
-    """运行HTTP服务器"""
-    port = int(os.getenv("PORT", 8000))
-    host = os.getenv("HOST", "0.0.0.0")
-    
-    print(f"🚀 启动LIFEX Car Loan AI Agent HTTP服务器...")
-    print(f"📍 服务器地址: {host}:{port}")
-    
-    server = ThreadingHTTPServer((host, port), LIFEXHandler)
+    """运行服务器"""
+    PORT = int(os.getenv('PORT', 10000))
     
     try:
-        print(f"✅ 服务器正在运行在 http://{host}:{port}")
+        server = ThreadingHTTPServer(('0.0.0.0', PORT), CORSRequestHandler)
+        print(f"🚀 Server starting on port {PORT}")
+        print(f"🔗 Health check: http://localhost:{PORT}/health")
+        print(f"💬 Chat endpoint: http://localhost:{PORT}/chat")
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n🛑 服务器关闭")
+        print("\n🛑 Server shutting down...")
         server.shutdown()
+    except Exception as e:
+        print(f"❌ Server error: {e}")
 
 if __name__ == "__main__":
     run_server()

@@ -1,9 +1,9 @@
 services:
   - type: web
-    name: camp-backend
+    name: lifex-backend
     runtime: python
-    buildCommand: ""
-    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"
     envVars:
-      - key: OPENROUTER_API_KEY
-        value: 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
+      - key: PORT
+        value: 10000
