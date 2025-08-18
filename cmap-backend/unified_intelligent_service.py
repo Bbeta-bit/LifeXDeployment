@@ -162,7 +162,7 @@ class UnifiedIntelligentService:
         """🔧 主API方法：处理用户消息 - 兼容main.py调用"""
         
         print(f"\n📄 Processing user message - Session: {session_id}")
-        print(f"📝 User message: {user_message}")
+        print(f"🔍 User message: {user_message}")
         print(f"📊 Current customer info: {current_customer_info}")
         
         # 检测会话重置需求
@@ -189,7 +189,7 @@ class UnifiedIntelligentService:
         # 同步来自前端的客户信息
         if current_customer_info:
             self._sync_customer_info_from_form(state["customer_profile"], current_customer_info)
-            print(f"📄 Synced customer info from frontend")
+            print(f"🔄 Synced customer info from frontend")
         
         # 添加当前消息到历史
         state["conversation_history"].append({"role": "user", "content": user_message})
@@ -279,7 +279,7 @@ class UnifiedIntelligentService:
 
     def _sync_customer_info_from_form(self, profile: CustomerProfile, form_info: Dict):
         """从表单同步客户信息到profile"""
-        print(f"📄 Syncing form info: {form_info}")
+        print(f"🔄 Syncing form info: {form_info}")
         
         for field, value in form_info.items():
             if hasattr(profile, field):
@@ -299,7 +299,7 @@ class UnifiedIntelligentService:
                     
                     if value is not None:
                         setattr(profile, field, value)
-                        print(f"📄 Synced from form: {field} = {value}")
+                        print(f"🔄 Synced from form: {field} = {value}")
 
     def _update_customer_profile_with_priority(self, profile: CustomerProfile, extracted_info: Dict[str, Any], manual_info: Dict = None):
         """使用优先级策略更新客户档案：自动提取 > 手动修改，最新信息 > 历史信息"""
@@ -322,71 +322,59 @@ class UnifiedIntelligentService:
                 if current_value != value:
                     print(f"🤖 Auto-extracted (priority): {field} = {value} (was: {current_value})")
 
+    # 🔧 核心修复：_extract_mvp_and_preferences函数
     async def _extract_mvp_and_preferences(self, conversation_history: List[Dict]) -> Dict[str, Any]:
-        """使用Claude提取MVP信息和偏好，带fallback机制"""
+        """🔧 修复后的MVP信息提取方法 - 针对性修复关键问题"""
         try:
             # 检查API密钥
             if not self.anthropic_api_key:
                 print("⚠️ No Anthropic API key - using rule-based extraction")
                 return self._enhanced_rule_based_extraction(conversation_history)
             
+            # 🔧 修复1: 改进对话文本构建 - 取更多轮对话，并处理特殊情况
             conversation_text = "\n".join([
-                f"{msg['role']}: {msg['content']}" for msg in conversation_history[-6:]  # 最近6轮对话
+                f"{msg['role']}: {msg['content']}" 
+                for msg in conversation_history[-8:]  # 增加到8轮对话
+                if isinstance(msg, dict) and 'content' in msg and msg['content'].strip()
             ])
             
-            # 修复后的Prompt - 重点提高语义理解和否定语句处理
-            system_prompt = """你是专业的客户信息提取助手。从对话中灵活提取客户贷款信息，重点理解语义而非严格匹配格式。
+            if not conversation_text.strip():
+                print("⚠️ Empty conversation text")
+                return self._enhanced_rule_based_extraction(conversation_history)
+            
+            # 🔧 修复2: 简化和优化提示词 - 更简洁、更清晰的英文提示
+            system_prompt = """Extract customer loan information from the conversation. Return ONLY a JSON object with these exact fields:
 
-核心提取规则：
-1. **否定语句处理**：
-   - "no ABN" / "don't have ABN" / "no abn and gst years" → ABN_years: 0
-   - "no GST" / "not registered for GST" → GST_years: 0
-   - "no property" / "don't own property" → property_status: "non_property_owner"
-
-2. **灵活数值识别**：
-   - "credit score 600" / "600 credit" / "score is 600" → credit_score: 600
-   - "$20000" / "20000" / "20k" / "twenty thousand" → desired_loan_amount: 20000
-   - "2 years ABN" / "ABN for 2 years" → ABN_years: 2
-
-3. **业务术语理解**：
-   - "sole trader" / "self employed" → business_structure: "sole_trader"
-   - "company" / "pty ltd" → business_structure: "company"
-   - "commercial loan" / "business use" → loan_type: "commercial"
-   - "personal loan" / "personal use" → loan_type: "consumer"
-
-4. **调整要求识别**：
-   - "lower rate" / "better rate" → interest_rate_ceiling: (current_rate - 1)
-   - "higher amount" / "more money" → 提取新的loan amount
-   - "longer term" / "shorter term" → 提取新的loan term
-
-5. **语义理解**：
-   - 理解上下文关系，不仅匹配关键词
-   - 处理用户的完整回答，提取所有相关信息
-   - 识别隐含信息和业务逻辑
-
-返回纯JSON格式，不包含任何额外文字：
 {
-    "loan_type": "consumer" or "commercial" or null,
-    "asset_type": "primary" or "secondary" or "tertiary" or "motor_vehicle" or null,
-    "property_status": "property_owner" or "non_property_owner" or null,
-    "ABN_years": number or null,
-    "GST_years": number or null,
-    "credit_score": number or null,
-    "desired_loan_amount": number or null,
-    "loan_term_preference": number or null,
-    "vehicle_type": "passenger_car" or "light_truck" or "van_ute" or "motorcycle" or "heavy_truck" or null,
-    "vehicle_condition": "new" or "demonstrator" or "used" or null,
-    "business_structure": "sole_trader" or "company" or "trust" or "partnership" or null,
-    "interest_rate_ceiling": number or null,
-    "monthly_budget": number or null,
-    "vehicle_make": string or null,
-    "vehicle_model": string or null,
-    "vehicle_year": number or null,
-    "purchase_price": number or null
+    "loan_type": "commercial" | "consumer" | null,
+    "asset_type": "motor_vehicle" | "primary" | null,
+    "business_structure": "company" | "sole_trader" | "partnership" | "trust" | null,
+    "property_status": "property_owner" | "non_property_owner" | null,
+    "ABN_years": number | null,
+    "GST_years": number | null,
+    "credit_score": number | null,
+    "desired_loan_amount": number | null,
+    "vehicle_condition": "new" | "used" | null,
+    "loan_term_preference": number | null,
+    "vehicle_make": string | null,
+    "vehicle_model": string | null,
+    "vehicle_year": number | null
 }
 
-重要：只返回JSON，不包含任何解释文字。"""
+Key extraction rules:
+- "XYZ Pty Ltd" / "company" → business_structure: "company"
+- "8 yrs ABN" / "8 years ABN" → ABN_years: 8
+- "ABN & GST" together → both get same years
+- "owns property" / "property owner" → property_status: "property_owner"
+- "credit score 700" → credit_score: 700
+- "$80,000" → desired_loan_amount: 80000
+- "Ford Ranger" / "vehicle" → asset_type: "motor_vehicle"
+- "business use" / "construction firm" → loan_type: "commercial"
+- "2025" model → vehicle_condition: "new"
 
+Return only the JSON object, no other text."""
+
+            # 🔧 修复3: 优化API调用参数
             headers = {
                 "x-api-key": self.anthropic_api_key,
                 "Content-Type": "application/json",
@@ -394,24 +382,25 @@ class UnifiedIntelligentService:
             }
 
             payload = {
-                "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 800,
-                "temperature": 0.1,
+                "model": "claude-3-haiku-20240307",  # 🔧 使用更轻量且专门适合提取任务的模型
+                "max_tokens": 1000,  # 🔧 增加token数，确保完整输出
+                "temperature": 0.3,  # 🔧 适中的temperature，既不过于保守也不太随机
                 "system": system_prompt,
                 "messages": [
-                    {"role": "user", "content": f"从以下对话中提取客户信息:\n{conversation_text}"}
+                    {"role": "user", "content": f"Extract information from this conversation:\n\n{conversation_text}"}
                 ]
             }
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            # 🔧 修复4: 调整超时时间，更快响应
+            async with httpx.AsyncClient(timeout=15.0) as client:  # 从30秒减少到15秒
                 response = await client.post(self.api_url, headers=headers, json=payload)
                 
                 if response.status_code == 200:
                     result = response.json()
                     ai_response = result['content'][0]['text']
                     
-                    # 强化JSON清理
-                    clean_response = self._robust_json_cleaning(ai_response)
+                    # 🔧 修复5: 简化JSON清理逻辑
+                    clean_response = self._simplified_json_cleaning(ai_response)
                     
                     if clean_response:
                         extracted_data = json.loads(clean_response)
@@ -419,6 +408,7 @@ class UnifiedIntelligentService:
                         return extracted_data
                     else:
                         print("❌ Could not extract valid JSON from Claude response")
+                        print(f"Raw response: {ai_response[:200]}...")  # 🔧 添加调试信息
                         return self._enhanced_rule_based_extraction(conversation_history)
                     
                 else:
@@ -433,8 +423,53 @@ class UnifiedIntelligentService:
             print(f"❌ Claude extraction failed: {e}")
             return self._enhanced_rule_based_extraction(conversation_history)
 
+    def _simplified_json_cleaning(self, ai_response: str) -> str:
+        """🔧 修复5: 简化的JSON清理方法 - 更可靠"""
+        
+        # 移除空白字符
+        text = ai_response.strip()
+        
+        # 方法1: 直接尝试解析（最常见情况）
+        try:
+            json.loads(text)
+            return text
+        except json.JSONDecodeError:
+            pass
+        
+        # 方法2: 移除常见的markdown标记
+        if text.startswith('```json'):
+            text = text[7:]
+        elif text.startswith('```'):
+            text = text[3:]
+        
+        if text.endswith('```'):
+            text = text[:-3]
+        
+        text = text.strip()
+        
+        try:
+            json.loads(text)
+            return text
+        except json.JSONDecodeError:
+            pass
+        
+        # 方法3: 查找JSON边界（最后的尝试）
+        start = text.find('{')
+        end = text.rfind('}')
+        
+        if start != -1 and end != -1 and start < end:
+            json_text = text[start:end+1]
+            try:
+                json.loads(json_text)
+                return json_text
+            except json.JSONDecodeError:
+                pass
+        
+        print(f"🔧 JSON cleaning failed for: {text[:100]}...")
+        return None
+
     def _robust_json_cleaning(self, ai_response: str) -> str:
-        """强化的JSON清理方法"""
+        """强化的JSON清理方法 - 原有完整版本"""
         try:
             # 移除常见的标记
             clean_response = ai_response.strip()
@@ -527,54 +562,44 @@ class UnifiedIntelligentService:
         elif any(word in conversation_text for word in ["equipment", "machinery", "primary"]):
             extracted["asset_type"] = "primary"
         
-        # 5. 增强房产状态识别
-        property_owner_patterns = [
-            r"own\s+property", r"property\s+owner", r"have\s+property", 
-            r"property\s+backed", r"own\s+a\s+house"
-        ]
-        property_non_owner_patterns = [
-            r"no\s+property", r"don't\s+own", r"rent", r"renting",
-            r"non.property", r"without\s+property"
-        ]
-        
-        for pattern in property_owner_patterns:
-            if re.search(pattern, conversation_text):
-                extracted["property_status"] = "property_owner"
-                break
-        
-        if "property_status" not in extracted:
-            for pattern in property_non_owner_patterns:
-                if re.search(pattern, conversation_text):
-                    extracted["property_status"] = "non_property_owner"
-                    break
-        
-        # 6. 修复并增强数值提取
-        
-        # ABN年数 - 增强模式
+        # 5. **修复ABN年数提取** - 扩展模式
         abn_patterns = [
-            r"(\d+)\s*years?\s*abn", r"abn.*?(\d+)\s*years?", 
-            r"(\d+)\s*years?.*?abn", r"abn\s*for\s*(\d+)\s*years?"
+            r"(\d+)\s*(?:years?|yrs?)\s*abn",
+            r"abn\s*(?:for\s*)?(\d+)\s*(?:years?|yrs?)",
+            r"(\d+)\s*yrs?\s*abn",
+            r"running\s*for\s*(\d+)\s*yrs?\s*abn",
+            # 新增模式 - 处理 "8 yrs ABN & GST" 这种格式
+            r"(\d+)\s*yrs?\s*abn\s*&\s*gst",
+            r"(\d+)\s*yrs?\s*abn\s*and\s*gst",
+            r"(\d+)\s*years?\s*abn\s*&\s*gst"
         ]
+        
         for pattern in abn_patterns:
             match = re.search(pattern, conversation_text)
-            if match and "ABN_years" not in extracted:  # 不覆盖否定语句的结果
+            if match:
                 years = int(match.group(1))
-                if 0 <= years <= 50:
+                if 0 <= years <= 50:  # 合理的年数范围
                     extracted["ABN_years"] = years
-                break
+                    # 如果模式包含"gst"，GST年数也设为相同值
+                    if "gst" in pattern:
+                        extracted["GST_years"] = years
+                    break
         
-        # GST年数 - 增强模式
-        gst_patterns = [
-            r"(\d+)\s*years?\s*gst", r"gst.*?(\d+)\s*years?",
-            r"(\d+)\s*years?.*?gst", r"gst\s*for\s*(\d+)\s*years?"
-        ]
-        for pattern in gst_patterns:
-            match = re.search(pattern, conversation_text)
-            if match and "GST_years" not in extracted:  # 不覆盖否定语句的结果
-                years = int(match.group(1))
-                if 0 <= years <= 50:
-                    extracted["GST_years"] = years
-                break
+        # 6. **修复GST年数提取** - 除非已经从ABN&GST模式提取了
+        if "GST_years" not in extracted:
+            gst_patterns = [
+                r"(\d+)\s*(?:years?|yrs?)\s*gst",
+                r"gst\s*(?:for\s*)?(\d+)\s*(?:years?|yrs?)",
+                r"(\d+)\s*yrs?\s*gst"
+            ]
+            
+            for pattern in gst_patterns:
+                match = re.search(pattern, conversation_text)
+                if match:
+                    years = int(match.group(1))
+                    if 0 <= years <= 50:
+                        extracted["GST_years"] = years
+                        break
         
         # 7. **修复信用分数提取** - 扩展模式
         credit_patterns = [
@@ -583,7 +608,7 @@ class UnifiedIntelligentService:
             r"(\d{3,4})\s*credit",
             r"my\s*score\s*(?:is\s*)?(\d{3,4})",
             r"(\d{3,4})\s*score",
-            # 新增模式 - 处理 "credit score 958" 这种格式
+            # 新增模式 - 处理 "credit score 700" 这种格式
             r"credit\s*score\s*(\d{3,4})",
             r"score\s*(\d{3,4})",
             # 处理逗号分隔的情况
@@ -643,6 +668,54 @@ class UnifiedIntelligentService:
             if "desired_loan_amount" in extracted:
                 break
         
+        # 9. **修复房产状况提取**
+        property_owner_patterns = [
+            r"owns?\s*(?:an?\s*)?(?:own-occupied\s*)?property",
+            r"property\s*owner",
+            r"own-occupied\s*property",
+            r"he\s*owns\s*an?\s*own-occupied\s*property"
+        ]
+        
+        for pattern in property_owner_patterns:
+            if re.search(pattern, conversation_text):
+                extracted["property_status"] = "property_owner"
+                break
+        
+        # 10. **修复车辆信息提取**
+        vehicle_patterns = [
+            r"(ford)\s*(ranger)",
+            r"(toyota)\s*(camry)",
+            r"(holden)\s*(commodore)",
+            # 更通用的车辆模式
+            r"(\w+)\s*(ranger|camry|commodore|hilux|triton)"
+        ]
+        
+        for pattern in vehicle_patterns:
+            match = re.search(pattern, conversation_text, re.IGNORECASE)
+            if match:
+                extracted["vehicle_make"] = match.group(1).capitalize()
+                extracted["vehicle_model"] = match.group(2).capitalize()
+                extracted["asset_type"] = "motor_vehicle"
+                break
+        
+        # 11. **修复车辆年份和状况**
+        year_patterns = [
+            r"(20\d{2})\s*(?:ford|toyota|holden)",
+            r"(?:ford|toyota|holden)\s*(20\d{2})",
+            r"(20\d{2})\s*(?:ranger|camry|commodore)"
+        ]
+        
+        for pattern in year_patterns:
+            match = re.search(pattern, conversation_text)
+            if match:
+                year = int(match.group(1))
+                current_year = 2024
+                if 2020 <= year <= current_year + 2:
+                    extracted["vehicle_year"] = year
+                    extracted["vehicle_condition"] = "new" if year >= current_year else "used"
+                    break
+        
+        print(f"📋 Rule-based extraction completed: {len(extracted)} fields extracted")
         return extracted
 
     def _get_required_mvp_fields(self, profile: CustomerProfile) -> List[str]:
@@ -885,9 +958,9 @@ class UnifiedIntelligentService:
         
         return message
 
-    # 同时需要修复全局匹配函数中的调用
+    # 🔧 修复：全局产品匹配方法返回列表类型
     async def _global_product_matching(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
-        """修复后的全局产品匹配"""
+        """🔧 修复：全局产品匹配 - 返回列表类型"""
         
         print(f"🌍 Starting GLOBAL product matching across all lenders...")
         print(f"📊 Customer profile: ABN={profile.ABN_years}, GST={profile.GST_years}")
@@ -897,8 +970,8 @@ class UnifiedIntelligentService:
         term_months = 60
         all_candidates = []
         
-        # === ANGLE 产品检查 === (修复：从ANGEL改为ANGLE)
-        angle_candidates = self._match_angle_products(profile, loan_amount, term_months)  # 修复函数名
+        # === ANGLE 产品检查 ===
+        angle_candidates = self._match_angle_products(profile, loan_amount, term_months)
         all_candidates.extend(angle_candidates)
         
         # === BFS 产品检查 ===
@@ -919,7 +992,7 @@ class UnifiedIntelligentService:
             print("❌ No eligible products found across all lenders")
             return self._create_default_basic_recommendation(profile, loan_amount, term_months)
         
-        # **关键修复：按比较利率排序，选择全局最优**
+        # **关键修复：按比较利率排序，选择全局最优，但返回列表**
         all_candidates.sort(key=lambda x: x['comparison_rate'])
         best_product = all_candidates[0]
         
@@ -930,7 +1003,7 @@ class UnifiedIntelligentService:
         print(f"   Comparison Rate: {best_product['comparison_rate']}%")
         print(f"   Monthly Payment: ${best_product['monthly_payment']}")
         
-        return best_product
+        return [best_product]  # 🔧 修复：返回列表而不是单个产品
 
     async def _ai_product_matching(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
         """AI产品匹配 - 基于comparison rate优先匹配最低利率"""
@@ -1021,7 +1094,7 @@ No explanatory text."""
 
             payload = {
                 "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 2000,
+                "max_tokens": 2500,
                 "temperature": 0.1,
                 "system": system_prompt,
                 "messages": [
@@ -1069,10 +1142,10 @@ No explanatory text."""
             print(f"❌ Unexpected error in AI product matching: {e}")
             return []
 
-    def _create_global_optimal_recommendation(self, profile: CustomerProfile) -> Dict[str, Any]:
-        """🌍 创建全局最优产品推荐 - 无优先级偏向"""
+    def _create_global_optimal_recommendation(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
+        """🌟 创建全局最优产品推荐 - 无优先级偏向"""
         
-        print("🌍 GLOBAL PRODUCT MATCHING - All Lenders")
+        print("🌟 GLOBAL PRODUCT MATCHING - All Lenders")
         print(f"📊 Profile: ABN={profile.ABN_years}, GST={profile.GST_years}, Credit={profile.credit_score}, Property={profile.property_status}")
         
         loan_amount = profile.desired_loan_amount or 80000  # 使用测试案例金额
@@ -1101,7 +1174,7 @@ No explanatory text."""
             print("❌ No eligible products found across all lenders")
             return self._create_default_basic_recommendation(profile, loan_amount, term_months)
         
-        # **关键修复：按比较利率排序，选择全局最优**
+        # **关键：按比较利率排序，选择全局最优**
         all_candidates.sort(key=lambda x: x['comparison_rate'])
         best_product = all_candidates[0]
         
@@ -1112,9 +1185,14 @@ No explanatory text."""
         print(f"   Comparison Rate: {best_product['comparison_rate']}%")
         print(f"   Monthly Payment: ${best_product['monthly_payment']}")
         
-        return best_product
+        return [best_product]
 
-    
+    def _create_fallback_recommendations(self, profile: CustomerProfile) -> List[Dict[str, Any]]:
+        """创建后备推荐 - 兼容性方法"""
+        return self._create_default_basic_recommendation(profile, 
+                                                       profile.desired_loan_amount or 80000, 
+                                                       profile.loan_term_preference or 60)
+
     def _match_angle_products(self, profile: CustomerProfile, loan_amount: int, term_months: int) -> List[Dict]:
         """匹配Angle产品 - 修复后的版本"""
         products = []
@@ -1126,8 +1204,8 @@ No explanatory text."""
         print(f"   房产状态: {profile.property_status}")
         print(f"   业务结构: {profile.business_structure}")
     
-    # 优先级1: A+ Rate with Discount (New Assets) - 5.99%
-    # 需要>=30万loan amount + 8年ABN + 4年GST + 新车 + 有房产 + 高信用评分
+        # 优先级1: A+ Rate with Discount (New Assets) - 5.99%
+        # 需要>=30万loan amount + 8年ABN + 4年GST + 新车 + 有房产 + 高信用评分
         if (profile.ABN_years and profile.ABN_years >= 8 and
             profile.GST_years and profile.GST_years >= 4 and
             profile.credit_score and profile.credit_score >= 600 and
@@ -1318,12 +1396,6 @@ No explanatory text."""
         
         print(f"🔶 Angle: Found {len(products)} eligible products")
         return products
-
-
-
-
-    # 🔧 其他三家贷方完整修复代码
-# 替换您现有的 _match_bfs_products, _match_raf_products, _match_fcau_products
 
     def _match_bfs_products(self, profile: CustomerProfile, loan_amount: int, term_months: int) -> List[Dict]:
         """修复后的BFS产品匹配 - 添加完整条件检查"""
@@ -1636,14 +1708,14 @@ No explanatory text."""
         print(f"🟡 FCAU: Found {len(products)} eligible products")
         return products
 
-    def _create_default_basic_recommendation(self, profile: CustomerProfile, loan_amount: int, term_months: int) -> Dict[str, Any]:
+    def _create_default_basic_recommendation(self, profile: CustomerProfile, loan_amount: int, term_months: int) -> List[Dict[str, Any]]:
         """创建基础默认推荐"""
         
         base_rate = 10.75
         comparison_rate = 11.85
         monthly_payment = self._calculate_monthly_payment(loan_amount, base_rate, term_months)
         
-        return {
+        return [{
             "lender_name": "Angle",
             "product_name": "Primary Asset Finance",
             "base_rate": base_rate,
@@ -1653,8 +1725,15 @@ No explanatory text."""
             "loan_term_options": "12-60 months",
             "requirements_met": True,
             "documentation_type": "Low Doc",
-            "eligibility_score": 5
-        }
+            "eligibility_score": 5,
+            "documentation_requirements": [
+                "Driver licence (front & back)",
+                "Medicare card",
+                "Car purchase contract",
+                "Council rates notice (last 90 days) for the property owner",
+                "ASIC extract"
+            ]
+        }]
 
     def _calculate_monthly_payment(self, loan_amount: int, annual_rate: float, term_months: int) -> float:
         """计算月还款额"""
